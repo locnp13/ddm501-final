@@ -15,7 +15,7 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements-train.txt
-      - run: pip install -r requirements-train.txt ruff pytest-cov
+      - run: pip install -r requirements-train.txt ruff==0.12.0 pytest-cov
       - run: ruff check src tests
       - run: pytest --cov=src --cov-report=term-missing
 
