@@ -146,6 +146,8 @@ docs/             sơ đồ luồng MLOps, spec
 
 ## Trạng thái hiện tại
 
+Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.664, model `churn-model` v1 ở Production, API dự đoán được). Các câu hỏi cần nhóm chốt: [`docs/open-questions.md`](docs/open-questions.md).
+
 Đã có: pipeline huấn luyện, API cơ bản, stack Compose có healthcheck, metric và alert rules, CI lint/test/build.
 
 Chưa hoàn thành (theo yêu cầu đề bài):

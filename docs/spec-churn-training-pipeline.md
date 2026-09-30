@@ -2,7 +2,7 @@
 title: 'Pipeline huấn luyện churn (Telco) với MLflow, DVC, Evidently'
 type: 'feature'
 created: '2026-09-30'
-status: 'in-progress'
+status: 'done'
 baseline_commit: 'NO_VCS'
 context: []
 ---
@@ -48,15 +48,15 @@ context: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `requirements-train.txt`, `deploy/Dockerfile.train` -- xgboost, optuna, pandera, dvc, evidently, pytest (ghim phiên bản) -- môi trường huấn luyện
-- [ ] `requirements.txt` -- thêm `xgboost` (đúng phiên bản train) -- API nạp được model
-- [ ] `docker-compose.yml` -- service `trainer` (profile `train`, mount repo vào `/work`, đợi mlflow healthy) -- chạy `docker compose run --rm trainer dvc repro`
-- [ ] `src/training/data.py` -- tải CSV, schema Pandera, làm sạch, ghi `data/processed/churn.csv` -- ingest + validate
-- [ ] `src/training/model.py` -- wrapper pyfunc trả P(churn) -- khớp API
-- [ ] `src/training/train.py` -- split, Optuna + CV, đánh giá, báo cáo Evidently (train vs test), log MLflow, cổng chất lượng, đăng ký -- huấn luyện
-- [ ] `dvc.yaml`, `params.yaml`, `.dvc/` -- stage `ingest` và `train` -- tái lập
-- [ ] `tests/test_data.py`, `tests/test_gate.py` -- test ca sai schema, TotalCharges rỗng, quyết định cổng -- ma trận I/O
-- [ ] `CLAUDE.md` -- cập nhật lệnh thật (build, chạy pipeline, chạy test) -- tài liệu repo
+- [x] `requirements-train.txt`, `deploy/Dockerfile.train` -- xgboost, optuna, pandera, dvc, evidently, pytest (ghim phiên bản) -- môi trường huấn luyện
+- [x] `requirements.txt` -- thêm `xgboost` (đúng phiên bản train) -- API nạp được model
+- [x] `docker-compose.yml` -- service `trainer` (profile `train`, mount repo vào `/work`, đợi mlflow healthy) -- chạy `docker compose run --rm trainer dvc repro`
+- [x] `src/training/data.py` -- tải CSV, schema Pandera, làm sạch, ghi `data/processed/churn.csv` -- ingest + validate
+- [x] `src/training/model.py` -- wrapper pyfunc trả P(churn) -- khớp API
+- [x] `src/training/train.py` -- split, Optuna + CV, đánh giá, báo cáo Evidently (train vs test), log MLflow, cổng chất lượng, đăng ký -- huấn luyện
+- [x] `dvc.yaml`, `params.yaml`, `.dvc/` -- stage `ingest` và `train` -- tái lập
+- [x] `tests/test_data.py`, `tests/test_gate.py` -- test ca sai schema, TotalCharges rỗng, quyết định cổng -- ma trận I/O
+- [x] `CLAUDE.md` -- cập nhật lệnh thật (build, chạy pipeline, chạy test) -- tài liệu repo
 
 **Acceptance Criteria:**
 - Given stack đang chạy, when chạy `dvc repro` trong trainer, then có run MLflow chứa params, PR-AUC/ROC-AUC/recall/F1, báo cáo Evidently và model `churn-model` ở Production.
@@ -64,6 +64,8 @@ context: []
 - Given không đổi dữ liệu và tham số, when chạy `dvc repro` lần hai, then DVC bỏ qua các stage đã cache.
 
 ## Spec Change Log
+
+- 2026-09-30: nâng `xgboost` 2.1.3 -> 2.1.4 (image train và API) vì 2.1.3 không tương thích scikit-learn 1.6.0, khiến CV trả `nan`. Ghim thêm `multimethod==1.12`, `pathspec==0.12.1` cho pandera/DVC. Thêm MinIO làm artifact store và remote DVC. Các câu hỏi còn mở: `docs/open-questions.md`.
 
 ## Design Notes
 

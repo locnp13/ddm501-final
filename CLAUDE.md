@@ -4,7 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-This directory is currently empty apart from `DDM501_Final_Project.pdf` (the course brief). There is no code, git repo, build system, or tests yet. Update this file with real commands and architecture once the stack is chosen and code exists.
+Git repo (origin `github.com/locnp13/ddm501-final`, branch `main`). Training pipeline, API skeleton, Compose stack and CI exist; see `README.md` for status and `docs/open-questions.md` for undecided points. Still missing: Grafana dashboards, SHAP/LIME, fairness analysis, API integration tests, coverage >80%, CI deploy step.
+
+## Commands
+
+Everything runs in Docker; no Python install on the host is needed.
+
+- Start stack: `docker compose up -d --build` (MLflow on host port 5001, MinIO 9000/9001, API 8000, Prometheus 9090, Grafana 3000)
+- Train (DVC: `ingest` then `train`, registers `churn-model` to Production if PR-AUC gate passes): `docker compose run --rm trainer dvc repro`
+- Reload model in API (loaded only at startup): `docker compose restart api`
+- Tests: `docker compose run --rm trainer pytest -q`; lint: `ruff check src tests` (config in `ruff.toml`)
+- Data remote is the `dvc` bucket on MinIO: `docker compose run --rm trainer dvc push|pull`
+
+## Architecture
+
+`src/training/data.py` (download, Pandera schema, clean) -> `train.py` (Optuna + CV, MLflow logging, Evidently report, quality gate, registry) -> `model.py` (pyfunc wrapper returning P(churn)). `src/serving/app.py` loads `models:/churn-model/Production` and exposes `/v1/predict`, `/health`, `/metrics`. MLflow metadata is in Postgres and artifacts in MinIO (`mlflow` bucket). Pin xgboost/scikit-learn identically in `requirements.txt` (API) and `requirements-train.txt` (trainer) or the model will not load.
 
 ## What the project is
 

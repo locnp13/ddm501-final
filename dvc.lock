@@ -21,3 +21,36 @@ stages:
       hash: md5
       md5: 3b0bfab28a8101b4e4fdd08025a5c235
       size: 970457
+  train:
+    cmd: python -m src.training.train
+    deps:
+    - path: data/processed/churn.csv
+      hash: md5
+      md5: ac85ad9126ae97665141338f0fc6bbcf
+      size: 885482
+    - path: src/training/model.py
+      hash: md5
+      md5: d8c41a5f9a03409cd534074224c88e0f
+      size: 619
+    - path: src/training/train.py
+      hash: md5
+      md5: d60a079476e491c44ef28e2d571be651
+      size: 6659
+    params:
+      params.yaml:
+        gate:
+          min_pr_auc: 0.5
+        train:
+          seed: 42
+          test_size: 0.2
+          n_trials: 20
+          cv_folds: 5
+    outs:
+    - path: reports/drift.html
+      hash: md5
+      md5: c6c778900c3dd044f43611d7f63ce724
+      size: 3213176
+    - path: reports/metrics.json
+      hash: md5
+      md5: cbf8ae79f6d820b32fbadae814d3bda0
+      size: 102
