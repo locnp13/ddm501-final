@@ -15,9 +15,13 @@ stages:
       - data/processed/churn.csv
       - src/training/train.py
       - src/training/model.py
+      - src/training/features.py
+      - src/training/business.py
+      - src/training/registry.py
     params:
       - train
       - gate
+      - economics
     outs:
       - reports/drift.html
     metrics:

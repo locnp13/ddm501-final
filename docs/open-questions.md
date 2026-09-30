@@ -29,6 +29,30 @@ Còn thiếu so với đề:
 - Coverage khoảng 41%, `train.py` gần như chưa được test.
 - Gate hiện chỉ so với ngưỡng cố định 0.50, không so với model đang Production.
 
+### Kết quả mảng 1 (2026-09-30)
+
+Đã triển khai Q1-Q4, Q6-Q11, Q13 (code: `features.py`, `business.py`, `registry.py`, `train.py`, `promote.py`). Run thật trên Telco: model `churn-model` v2 (XGBoost đã tune, không dùng feature mới, bỏ `gender`/`SeniorCitizen`) qua gate, được duyệt lên `champion`; API nạp `models:/churn-model@champion` và dự đoán được.
+
+CV PR-AUC (5-fold, OOF gộp) của các cấu hình chính:
+
+| Cấu hình | CV PR-AUC |
+|---|---|
+| Dummy (mốc theo tỷ lệ churn) | 0.265 |
+| Random Forest (tốt nhất) | 0.656 |
+| Logistic Regression + feature mới, bỏ cột nhạy cảm | 0.659 |
+| XGBoost mặc định | 0.658 |
+| XGBoost đã tune, không feature mới, bỏ cột nhạy cảm (được chọn) | 0.666 |
+
+Kết quả trên test (1.409 dòng): PR-AUC 0.663, ROC-AUC 0.848; Brier 0.1355 sau hiệu chuẩn (0.1604 trước); lợi nhuận thực tế tối đa 30.614 khi liên hệ 35% khách có điểm cao nhất (recall 0.74, precision 0.56), theo các giả định ở Q1.
+
+Những điều rút ra, cần nói thật trong báo cáo:
+
+- **Mọi mô hình khác Dummy đều nằm trong khoảng 0.65-0.67**: dataset này gần như đã "bão hòa", chênh lệch giữa Logistic Regression, Random Forest và XGBoost nhỏ hơn nhiễu. XGBoost được chọn chỉ nhờ hơn khoảng 0.004-0.008 trên CV.
+- **Feature mới (Q6) không cải thiện rõ**: hầu hết cặp có/không có feature chênh dưới 0.002 (cây quyết định đã tự học được các quan hệ này). Kết quả trung thực để đưa vào báo cáo, không phải lỗi.
+- **Cột nhạy cảm (Q7)**: bỏ `gender`/`SeniorCitizen` gần như không mất PR-AUC (quy tắc chọn dùng dung sai 0.005). `gender` gần như không ảnh hưởng chênh lệch chọn khách (0.002); `SeniorCitizen` vẫn chênh 0.09-0.17 ở top 10% trong CV (0.11 trên test) vì nhóm này có tỷ lệ churn thực tế cao hơn, và bỏ cột không loại được vì còn các biến proxy. Cần xử lý tiếp ở mục fairness (mảng 4).
+- **`scale_pos_weight` (Q4)**: với hiệu chuẩn isotonic, bỏ nó không đổi chất lượng (CV cùng loại 0.6702 với, 0.6711 không). Có thể bỏ ở bước sau để đơn giản hóa.
+- **API vẫn gắn nhãn churn ở ngưỡng 0.5** (`app.py`, ngoài phạm vi mảng 1): sau hiệu chuẩn, xác suất là xác suất thật nên cần xem lại; thuộc mảng 2.
+
 ## 2. Câu hỏi về bài toán và metric
 
 | # | Câu hỏi | Vì sao quan trọng | Đề xuất mặc định | Quyết định |
@@ -52,7 +76,7 @@ Còn thiếu so với đề:
 | # | Câu hỏi | Đề xuất mặc định | Quyết định |
 |---|---|---|---|
 | Q9 | Ai được phép đưa model lên Production: tự động khi qua gate, hay cần người duyệt? | Tự động lên `Staging` khi qua gate, người duyệt chuyển `Production` (hoặc so với model hiện tại: chỉ thăng hạng khi PR-AUC không kém) | **Đã chốt (cách A+B)**: luồng `train -> gate (so với champion hiện tại) -> Staging/challenger -> một thành viên duyệt và chạy lệnh thăng hạng -> Production`. Chi tiết ngưỡng ở Q10, cơ chế alias ở Q11. |
-| Q10 | Ngưỡng gate 0.50 có ý nghĩa gì khi kết quả là 0.66? | Đặt ngưỡng = baseline tốt nhất từ Q3 cộng một biên, và thêm điều kiện không tệ hơn model hiện tại | **Đã chốt (cách A)**: gate gồm 3 điều kiện: (1) PR-AUC >= 0.50 (sàn tuyệt đối); (2) PR-AUC >= PR-AUC của Logistic Regression + 0.02; (3) PR-AUC >= champion hiện tại - 0.005 (bỏ qua ở lần chạy đầu khi chưa có champion). Các biên 0.02 và 0.005 là đề xuất chưa đo đạc, đặt trong `params.yaml`, chỉnh lại theo độ lệch chuẩn CV PR-AUC khi có số liệu. |
+| Q10 | Ngưỡng gate 0.50 có ý nghĩa gì khi kết quả là 0.66? | Đặt ngưỡng = baseline tốt nhất từ Q3 cộng một biên, và thêm điều kiện không tệ hơn model hiện tại | **Đã chốt (cách A)**: gate gồm 3 điều kiện: (1) PR-AUC >= 0.50 (sàn tuyệt đối); (2) PR-AUC >= PR-AUC của Logistic Regression + 0.02; (3) PR-AUC >= champion hiện tại - 0.005 (bỏ qua ở lần chạy đầu khi chưa có champion). Các biên 0.02 và 0.005 là đề xuất chưa đo đạc, đặt trong `params.yaml`, chỉnh lại theo độ lệch chuẩn CV PR-AUC khi có số liệu. **Sửa ngày 2026-09-30 sau khi đo (biên 0.02 -> 0.0)**: XGBoost trừ LogReg trên 25 fold CV có trung bình +0.0035 (độ lệch chuẩn 0.007, XGBoost thắng 19/25); trên test là +0.0147 với khoảng tin cậy bootstrap 95% (-0.004; +0.034), tức nằm trong nhiễu. Biên 0.02 sẽ từ chối mọi mô hình phức tạp, nên đặt 0.0 (chỉ yêu cầu không tệ hơn baseline). Điều kiện baseline bỏ qua khi mô hình thắng là `logreg` hoặc `dummy` (không so với chính nó). |
 | Q11 | Model Registry stage (`Production`) đã bị MLflow đánh dấu deprecated. Đổi sang alias (`champion`) hay giữ? | Đổi sang alias ngay bây giờ để khỏi phải sửa API sau (`models:/churn-model@champion`) | **Đã chốt (cách A)**: dùng alias `challenger` (qua gate) và `champion` (đã duyệt). Sửa 3 chỗ: `train.py` (`set_registered_model_alias`), `MODEL_URI` mặc định trong `src/serving/app.py` và `docker-compose.yml` (`models:/churn-model@champion`), và thêm script duyệt đặt alias `champion`. Việc sửa `app.py` là ngoại lệ so với ràng buộc "Never" của spec đợt trước. |
 | Q12 | Báo cáo Evidently đang so train với test (chia ngẫu nhiên nên gần như không có drift, ít giá trị). Giữ làm gì? | Giữ như kiểm tra nhanh, chuyển trọng tâm sang so dữ liệu serving với tập train (xem Q16) | **Đã chốt (cách A)**: giữ báo cáo như sanity check xác nhận chia train/test không bị lệch. Không gọi là drift detection trong tài liệu hay slide vì hai tập chia ngẫu nhiên từ cùng nguồn. Drift thật (serving vs train) làm ở Q16/Q17. |
 | Q13 | Tập test dùng cho cả báo cáo và gate. Có cần thêm tập validation riêng không? | Không cần thêm vì tuning dùng CV trên tập train; chỉ ghi rõ test chỉ đánh giá một lần | **Đã chốt (cách A)**: giữ hai tập (train 80% / test 20%). Quy tắc: chọn mô hình, feature (Q6), cột nhạy cảm (Q7) và siêu tham số **chỉ bằng CV PR-AUC** trên train; test dùng đúng một lần cho mô hình đã chọn (báo cáo và gate). Ghi quy tắc này vào tài liệu. |

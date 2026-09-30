@@ -27,9 +27,9 @@ Hệ thống ML end-to-end dự đoán khách hàng có khả năng rời bỏ d
 DVC (ingest + validate) -> train (Optuna + CV) -> MLflow Tracking/Registry
    |  data/model-versioned in MinIO (S3)       metadata: Postgres | artifacts: MinIO
                                                         |
-                                            quality gate (PR-AUC >= ngưỡng)
+                                            quality gate (3 điều kiện) -> challenger -> duyệt -> champion
                                                         v
-                                   models:/churn-model/Production
+                                   models:/churn-model@champion
                                                         |
 Client -> FastAPI /v1/predict  <-- nạp model ------------+
              |
@@ -60,10 +60,12 @@ Yêu cầu: Docker và Docker Compose. Không cần cài Python lên máy host.
 # 1. Khởi động hạ tầng
 docker compose up -d --build
 
-# 2. Chạy pipeline: tải dữ liệu, kiểm định, huấn luyện, đăng ký model
-docker compose run --rm trainer dvc repro
+# 2. Chạy pipeline: tải dữ liệu, kiểm định, huấn luyện, đăng ký model (alias challenger)
+GIT_COMMIT=$(git rev-parse HEAD) GIT_DIRTY=$(git status --porcelain | wc -l) \
+  docker compose run --rm trainer dvc repro
 
-# 3. Nạp lại model trong API (API chỉ nạp model lúc khởi động)
+# 3. Duyệt model (bước của con người) rồi nạp lại trong API (API chỉ nạp model lúc khởi động)
+docker compose run --rm trainer python -m src.training.promote
 docker compose restart api
 ```
 
@@ -91,16 +93,16 @@ curl -X POST http://localhost:8000/v1/predict \
 # ví dụ đầu ra: {"churn_probability": 0.71}
 ```
 
-Khi chưa có model ở stage `Production`, `/v1/predict` trả `503 Model not loaded`. Đây là hành vi có chủ đích.
+Khi chưa có model mang alias `champion`, `/v1/predict` trả `503 Model not loaded`. Đây là hành vi có chủ đích.
 
 ## Pipeline huấn luyện
 
 Hai stage DVC (`dvc.yaml`), tham số trong `params.yaml`:
 
 1. **`ingest`** (`src/training/data.py`): tải CSV, kiểm định schema bằng Pandera, ép `TotalCharges` rỗng về NaN, ghi `data/processed/churn.csv`.
-2. **`train`** (`src/training/train.py`): chia train/test phân tầng theo `Churn`, tối ưu bằng Optuna với CV, ghi params/metrics/artifact lên MLflow, sinh báo cáo drift Evidently (train vs test), kiểm tra quality gate.
+2. **`train`** (`src/training/train.py`): chia train/test phân tầng theo `Churn`; so sánh Dummy, Logistic Regression, Random Forest, XGBoost với/không có feature mới và với/không có cột nhạy cảm bằng CV (mỗi cấu hình là một run MLflow); tune XGBoost bằng Optuna; hiệu chuẩn xác suất (isotonic); tính lợi nhuận và Recall@k theo mức liên hệ khách; ghi params/metrics/artifact và provenance (git commit, hash dữ liệu) lên MLflow; sinh báo cáo Evidently (train vs test, chỉ là sanity check); kiểm tra quality gate. Chọn mô hình chỉ dựa vào CV, tập test dùng một lần.
 
-**Quality gate**: model chỉ được chuyển lên `Production` khi PR-AUC trên tập test đạt `gate.min_pr_auc` (mặc định 0.50). Nếu không đạt, run vẫn được log nhưng model không được đăng ký và tiến trình thoát với mã khác 0.
+**Quality gate** (3 điều kiện, tham số trong `params.yaml`): PR-AUC test >= sàn 0.50; không tệ hơn baseline Logistic Regression (bỏ qua nếu chính LogReg thắng); không tệ hơn champion hiện tại quá 0.005. Qua gate thì model được đăng ký với alias `challenger`; một thành viên duyệt bằng `python -m src.training.promote` để thành `champion`, là model API phục vụ. Nếu không qua, run vẫn được log, model không được đăng ký và tiến trình thoát với mã khác 0.
 
 ### Dữ liệu và remote DVC (MinIO)
 
@@ -146,7 +148,7 @@ docs/             sơ đồ luồng MLOps, spec
 
 ## Trạng thái hiện tại
 
-Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.664, model `churn-model` v1 ở Production, API dự đoán được). Các câu hỏi cần nhóm chốt: [`docs/open-questions.md`](docs/open-questions.md).
+Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-model` v2 là champion, API dự đoán được). Các câu hỏi cần nhóm chốt: [`docs/open-questions.md`](docs/open-questions.md).
 
 Đã có: pipeline huấn luyện, API cơ bản, stack Compose có healthcheck, metric và alert rules, CI lint/test/build.
 
@@ -164,8 +166,8 @@ Chưa hoàn thành (theo yêu cầu đề bài):
 
 | Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
 |-------------|------------------------|------------|
-| `/v1/predict` trả 503 | Chưa có model `Production` hoặc API chưa nạp lại | Chạy `dvc repro`, rồi `docker compose restart api` |
-| `dvc repro` thoát mã khác 0 ở bước train | PR-AUC dưới ngưỡng gate | Xem metric ở MLflow, chỉnh `params.yaml` hoặc mô hình |
+| `/v1/predict` trả 503 | Chưa có model `champion` hoặc API chưa nạp lại | Chạy `dvc repro`, `python -m src.training.promote`, rồi `docker compose restart api` |
+| `dvc repro` thoát mã khác 0 ở bước train | Không qua quality gate (xem tag `gate_failures` của run) | Xem metric ở MLflow, chỉnh `params.yaml` hoặc mô hình |
 | Lỗi tải dữ liệu | Không có mạng và chưa có `data/raw/telco.csv` | Kết nối mạng, hoặc đặt CSV vào `data/raw/` |
 | Không mở được MLflow ở cổng 5000 | macOS AirPlay Receiver chiếm cổng | Dùng http://localhost:5001 |
 | `dvc push` báo lỗi kết nối | Chạy ngoài Docker nên không phân giải được `minio` | Chạy qua `docker compose run --rm trainer ...` |

@@ -62,7 +62,7 @@ services:
       dockerfile: deploy/Dockerfile.api
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      MODEL_URI: models:/churn-model/Production
+      MODEL_URI: models:/churn-model@champion
     depends_on:
       mlflow:
         condition: service_healthy
@@ -77,6 +77,9 @@ services:
     working_dir: /work
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      GIT_DIRTY: ${GIT_DIRTY:-unknown}
+      GIT_PYTHON_REFRESH: quiet  # silence GitPython: no git in the image, provenance comes from GIT_* vars
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}  # DVC remote on MinIO
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     volumes:

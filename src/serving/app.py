@@ -11,7 +11,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, ge
 
 logger = logging.getLogger("churn-api")
 
-MODEL_URI = os.getenv("MODEL_URI", "models:/churn-model/Production")
+MODEL_URI = os.getenv("MODEL_URI", "models:/churn-model@champion")
 
 REQUESTS = Counter("churn_requests_total", "Requests by endpoint and status", ["endpoint", "status"])
 LATENCY = Histogram("churn_request_latency_seconds", "Request latency", ["endpoint"])

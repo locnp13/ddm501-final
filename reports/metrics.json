@@ -1,7 +1,14 @@
 {
-  "pr_auc": 0.6641,
-  "roc_auc": 0.8471,
-  "precision": 0.5275,
-  "recall": 0.7941,
-  "f1": 0.6339
+  "pr_auc": 0.6632,
+  "roc_auc": 0.8477,
+  "brier": 0.1355,
+  "best_k": 0.35,
+  "best_profit": 30613.68,
+  "precision": 0.5619,
+  "recall": 0.7406,
+  "f1": 0.639,
+  "dpd_gender": 0.0021,
+  "dpd_senior": 0.1058,
+  "brier_uncalibrated": 0.1604,
+  "baseline_pr_auc": 0.649
 }
