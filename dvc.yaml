@@ -1,0 +1,25 @@
+stages:
+  ingest:
+    cmd: python -m src.training.data
+    deps:
+      - src/training/data.py
+    params:
+      - data
+    outs:
+      - data/raw/telco.csv:
+          persist: true
+      - data/processed/churn.csv
+  train:
+    cmd: python -m src.training.train
+    deps:
+      - data/processed/churn.csv
+      - src/training/train.py
+      - src/training/model.py
+    params:
+      - train
+      - gate
+    outs:
+      - reports/drift.html
+    metrics:
+      - reports/metrics.json:
+          cache: false

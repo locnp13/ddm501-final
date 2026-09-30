@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+mlruns/
+mlartifacts/
+graphify-out/
+
+# DVC-managed data and generated reports
+/data/raw
+/data/processed
+/reports/drift.html
+*.pdf

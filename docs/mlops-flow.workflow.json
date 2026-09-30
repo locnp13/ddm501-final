@@ -1,0 +1,219 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Luồng MLOps – Dự đoán khách hàng rời bỏ",
+    "output": "docs/mlops-flow.html",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "external": {
+          "label": "Nguồn dữ liệu"
+        },
+        "security": {
+          "label": "Cổng kiểm soát"
+        },
+        "backend": {
+          "label": "Xử lý ML"
+        },
+        "database": {
+          "label": "Kho mô hình"
+        },
+        "frontend": {
+          "label": "Người dùng"
+        },
+        "cloud": {
+          "label": "Giám sát"
+        },
+        "messagebus": {
+          "label": "Kích hoạt lại"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "train",
+      "label": "Dữ liệu, huấn luyện & đăng ký"
+    },
+    {
+      "id": "serve",
+      "label": "Phục vụ (Docker Compose)"
+    },
+    {
+      "id": "monitor",
+      "label": "Giám sát & huấn luyện lại"
+    }
+  ],
+  "mainPath": [
+    "raw",
+    "validate",
+    "features",
+    "train",
+    "gate",
+    "registry",
+    "api"
+  ],
+  "nodes": [
+    {
+      "id": "raw",
+      "lane": "train",
+      "col": 0,
+      "type": "external",
+      "label": "Dữ liệu Telco",
+      "sublabel": "CSV thô"
+    },
+    {
+      "id": "validate",
+      "lane": "train",
+      "col": 1,
+      "type": "security",
+      "label": "Kiểm định",
+      "sublabel": "schema + chất lượng",
+      "tag": "Pandera"
+    },
+    {
+      "id": "features",
+      "lane": "train",
+      "col": 2,
+      "type": "backend",
+      "label": "Tạo feature",
+      "sublabel": "sklearn Pipeline"
+    },
+    {
+      "id": "train",
+      "lane": "train",
+      "col": 3,
+      "type": "backend",
+      "label": "Huấn luyện",
+      "sublabel": "CV + Optuna",
+      "tag": "XGBoost"
+    },
+    {
+      "id": "gate",
+      "lane": "train",
+      "col": 4,
+      "type": "security",
+      "label": "Quality gate",
+      "sublabel": "PR-AUC + fairness",
+      "tag": "chặn"
+    },
+    {
+      "id": "registry",
+      "lane": "train",
+      "col": 5,
+      "type": "database",
+      "label": "Registry",
+      "sublabel": "Staging → Production"
+    },
+    {
+      "id": "api",
+      "lane": "serve",
+      "col": 5,
+      "type": "backend",
+      "label": "FastAPI",
+      "sublabel": "/v1/predict, /health",
+      "tag": "Docker"
+    },
+    {
+      "id": "client",
+      "lane": "serve",
+      "col": 4,
+      "type": "frontend",
+      "label": "Bộ phận CSKH",
+      "sublabel": "xác suất churn"
+    },
+    {
+      "id": "prom",
+      "lane": "monitor",
+      "col": 5,
+      "type": "cloud",
+      "label": "Prometheus",
+      "sublabel": "scrape /metrics"
+    },
+    {
+      "id": "grafana",
+      "lane": "monitor",
+      "col": 4,
+      "type": "cloud",
+      "label": "Grafana",
+      "sublabel": "dashboard + alert"
+    },
+    {
+      "id": "retrain",
+      "lane": "monitor",
+      "col": 3,
+      "type": "messagebus",
+      "label": "Huấn luyện lại",
+      "sublabel": "thủ công / workflow"
+    }
+  ],
+  "edges": [
+    {
+      "from": "raw",
+      "to": "validate"
+    },
+    {
+      "from": "validate",
+      "to": "features",
+      "label": "hợp lệ",
+      "variant": "emphasis"
+    },
+    {
+      "from": "features",
+      "to": "train"
+    },
+    {
+      "from": "train",
+      "to": "gate"
+    },
+    {
+      "from": "gate",
+      "to": "registry",
+      "label": "đạt ngưỡng",
+      "variant": "emphasis"
+    },
+    {
+      "from": "registry",
+      "to": "api",
+      "label": "nạp Production",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "client",
+      "label": "dự đoán"
+    },
+    {
+      "from": "api",
+      "to": "prom",
+      "label": "/metrics"
+    },
+    {
+      "from": "prom",
+      "to": "grafana"
+    },
+    {
+      "from": "grafana",
+      "to": "retrain",
+      "label": "drift / cảnh báo",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "from": "retrain",
+      "to": "features",
+      "label": "dữ liệu mới",
+      "variant": "dashed",
+      "role": "return"
+    },
+    {
+      "from": "gate",
+      "to": "train",
+      "label": "không đạt",
+      "variant": "security",
+      "role": "return"
+    }
+  ]
+}

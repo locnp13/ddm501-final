@@ -1,0 +1,6 @@
+FROM python:3.11-slim
+RUN pip install --no-cache-dir mlflow==2.19.0 psycopg2-binary==2.9.10 "sqlalchemy<2.1" \
+    && useradd --create-home --uid 10001 mlflow \
+    && mkdir /mlartifacts && chown mlflow /mlartifacts
+USER mlflow
+EXPOSE 5000
