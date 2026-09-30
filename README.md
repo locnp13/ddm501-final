@@ -9,9 +9,10 @@ Hệ thống ML end-to-end dự đoán khách hàng có khả năng rời bỏ d
 
 | Thành viên | Mã SV | Phụ trách |
 |------------|-------|-----------|
-| _Họ tên 1_ | _..._ | _..._ |
-| _Họ tên 2_ | _..._ | _..._ |
-| _Họ tên 3_ | _..._ | _..._ |
+| Nguyễn Thị Hồng Hạnh | 25MS13316 | _..._ |
+| Nguyễn Phúc Lộc | 25MS13314 | _..._ |
+| Phạm Văn Duy Khánh | 25MS13313 | _..._ |
+| Chu Đức Bình | 25MS13303 | _..._ |
 
 ## Bài toán
 
