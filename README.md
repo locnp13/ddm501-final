@@ -25,6 +25,7 @@ Hệ thống ML end-to-end dự đoán khách hàng có khả năng rời bỏ d
 
 ```
 DVC (ingest + validate) -> train (Optuna + CV) -> MLflow Tracking/Registry
+   |  data/model-versioned in MinIO (S3)       metadata: Postgres | artifacts: MinIO
                                                         |
                                             quality gate (PR-AUC >= ngưỡng)
                                                         v
@@ -41,7 +42,8 @@ Sơ đồ chi tiết: [`docs/mlops-flow.html`](docs/mlops-flow.html). Đặc t�
 
 | Service | Vai trò | Cổng host |
 |---------|---------|-----------|
-| `postgres` | Backend store của MLflow | - |
+| `postgres` | Backend store của MLflow (metadata: run, params, metrics, registry) | - |
+| `minio` | Object storage S3: bucket `mlflow` (artifact/model) và `dvc` (remote dữ liệu) | 9000 (S3), 9001 (console) |
 | `mlflow` | Tracking server + Model Registry | 5001 |
 | `api` | FastAPI phục vụ dự đoán | 8000 |
 | `trainer` | Chạy pipeline huấn luyện (profile `train`) | - |
@@ -69,6 +71,7 @@ Sau đó:
 
 - MLflow UI: http://localhost:5001
 - Swagger UI: http://localhost:8000/docs
+- MinIO console: http://localhost:9001 (mặc định `minioadmin` / `minioadmin`, đổi bằng biến `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`)
 - Prometheus: http://localhost:9090
 - Grafana: http://localhost:3000 (tài khoản mặc định `admin` / `admin`, chỉ dùng cho môi trường phát triển)
 
@@ -98,6 +101,17 @@ Hai stage DVC (`dvc.yaml`), tham số trong `params.yaml`:
 2. **`train`** (`src/training/train.py`): chia train/test phân tầng theo `Churn`, tối ưu bằng Optuna với CV, ghi params/metrics/artifact lên MLflow, sinh báo cáo drift Evidently (train vs test), kiểm tra quality gate.
 
 **Quality gate**: model chỉ được chuyển lên `Production` khi PR-AUC trên tập test đạt `gate.min_pr_auc` (mặc định 0.50). Nếu không đạt, run vẫn được log nhưng model không được đăng ký và tiến trình thoát với mã khác 0.
+
+### Dữ liệu và remote DVC (MinIO)
+
+Dữ liệu được version bằng DVC và lưu ở bucket `dvc` trên MinIO (cấu hình trong `.dvc/config`).
+
+```bash
+docker compose run --rm trainer dvc push   # đẩy dữ liệu lên MinIO
+docker compose run --rm trainer dvc pull   # lấy dữ liệu đúng phiên bản của commit hiện tại
+```
+
+Image MinIO chính thức không còn được phát hành công khai, nên compose dùng `bitnamilegacy/minio:2024.12.18` (bản MinIO đóng băng, không nhận bản vá). Phù hợp đồ án, không nên dùng cho production.
 
 ## Giám sát
 
@@ -152,4 +166,5 @@ Chưa hoàn thành (theo yêu cầu đề bài):
 | `dvc repro` thoát mã khác 0 ở bước train | PR-AUC dưới ngưỡng gate | Xem metric ở MLflow, chỉnh `params.yaml` hoặc mô hình |
 | Lỗi tải dữ liệu | Không có mạng và chưa có `data/raw/telco.csv` | Kết nối mạng, hoặc đặt CSV vào `data/raw/` |
 | Không mở được MLflow ở cổng 5000 | macOS AirPlay Receiver chiếm cổng | Dùng http://localhost:5001 |
+| `dvc push` báo lỗi kết nối | Chạy ngoài Docker nên không phân giải được `minio` | Chạy qua `docker compose run --rm trainer ...` |
 | Cổng đã bị chiếm | Dịch vụ khác đang chạy | Đổi ánh xạ cổng trong `docker-compose.yml` |

@@ -13,6 +13,24 @@ services:
       timeout: 3s
       retries: 10
 
+  minio:
+    # Official minio/minio images are no longer published; this is the last frozen Bitnami build.
+    image: bitnamilegacy/minio:2024.12.18
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_DEFAULT_BUCKETS: mlflow,dvc
+    volumes:
+      - miniodata:/bitnami/minio/data
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # web console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   mlflow:
     build:
       context: .
@@ -20,14 +38,18 @@ services:
     command: >
       mlflow server --host 0.0.0.0 --port 5000
       --backend-store-uri postgresql://mlflow:mlflow@postgres:5432/mlflow
-      --artifacts-destination /mlartifacts --serve-artifacts
+      --artifacts-destination s3://mlflow --serve-artifacts
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     ports:
       - "5001:5000"  # host 5000 is taken by macOS AirPlay Receiver
-    volumes:
-      - mlartifacts:/mlartifacts
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
       interval: 10s
@@ -55,6 +77,8 @@ services:
     working_dir: /work
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}  # DVC remote on MinIO
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     volumes:
       - .:/work
     depends_on:
@@ -86,5 +110,5 @@ services:
 
 volumes:
   pgdata:
-  mlartifacts:
+  miniodata:
   grafanadata:
