@@ -36,7 +36,7 @@ Client -> FastAPI /v1/predict  <-- nạp model ------------+
              +-> /metrics -> Prometheus -> Grafana (alert rules)
 ```
 
-Sơ đồ chi tiết: [`docs/mlops-flow.html`](docs/mlops-flow.html). Đặc tả pipeline huấn luyện: [`docs/spec-churn-training-pipeline.md`](docs/spec-churn-training-pipeline.md).
+Kiến trúc triển khai hiện tại (Compose + Kubernetes + runner) và hướng dẫn vận hành: [`docs/deployment-guide.md`](docs/deployment-guide.md). Sơ đồ luồng MLOps: [`docs/mlops-flow.html`](docs/mlops-flow.html). Đặc tả pipeline huấn luyện: [`docs/spec-churn-training-pipeline.md`](docs/spec-churn-training-pipeline.md).
 
 ### Các service trong `docker-compose.yml`
 
@@ -159,12 +159,12 @@ k8s/              manifest minikube: api, frontend, Ingress, canary
 deploy/           Dockerfile cho api, mlflow, trainer
 monitoring/       Prometheus, alert rules, Grafana provisioning
 tests/            test dữ liệu và quality gate
-docs/             sơ đồ luồng MLOps, spec
+docs/             hướng dẫn triển khai và vận hành, sơ đồ luồng MLOps, spec, quyết định thiết kế
 ```
 
 ## Trạng thái hiện tại
 
-Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-model` v2 là champion, API dự đoán được). Các câu hỏi cần nhóm chốt: [`docs/open-questions.md`](docs/open-questions.md).
+Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-model` v3 là champion, API chạy trên Kubernetes). Các câu hỏi cần nhóm chốt: [`docs/open-questions.md`](docs/open-questions.md).
 
 Đã có: pipeline huấn luyện, API cơ bản, stack Compose có healthcheck, metric và alert rules, CI lint/test/build.
 

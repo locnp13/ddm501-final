@@ -1,5 +1,7 @@
 # Kubernetes trên máy local (minikube)
 
+Tổng quan kiến trúc, luồng deploy và vận hành: [`docs/deployment-guide.md`](../docs/deployment-guide.md). Tài liệu này là phần chi tiết về cụm.
+
 Chỉ `api` và `frontend` chạy trong cụm. Postgres, MinIO và MLflow vẫn chạy bằng Docker Compose trên máy (Compose không còn `api` và `frontend`); pod gọi MLflow qua `host.minikube.internal:5001`, nên **stack Compose phải đang chạy** (`docker compose up -d mlflow minio postgres`).
 
 ## Dựng cụm

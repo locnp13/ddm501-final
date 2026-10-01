@@ -20,6 +20,9 @@ Everything runs in Docker; no Python install on the host is needed.
 
 ## Architecture
 
+Deployment topology, the deploy/model lifecycle flows, operations and known gaps are in `docs/deployment-guide.md`; keep it current when those change.
+
+
 `src/training/data.py` (download, Pandera schema, clean) -> `features.py` (in-pipeline feature engineering), `business.py` (profit/Recall@k), `registry.py` (gate, aliases, provenance), `train.py` (CV comparison, Optuna, isotonic calibration, MLflow logging, Evidently report) -> `model.py` (pyfunc wrapper returning P(churn)). `src/serving/app.py` loads `models:/churn-model@champion` and exposes `/v1/predict` (input validated by `src/serving/schemas.py`; keep it in sync with the Pandera `SCHEMA`, a test checks this), `/v1/model`, `/health`, `/metrics`. `frontend/` is an nginx container serving a static UI (plain HTML/CSS/JS) that calls the API through its `/api` proxy; `src/serving/model_info.py` builds the model description the UI shows from the MLflow registry. MLflow metadata is in Postgres and artifacts in MinIO (`mlflow` bucket). Pin xgboost/scikit-learn identically in `requirements.txt` (API) and `requirements-train.txt` (trainer) or the model will not load.
 
 ## What the project is
