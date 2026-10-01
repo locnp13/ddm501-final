@@ -80,7 +80,7 @@ def unknown_categories(features: CustomerFeatures) -> list[tuple[str, str]]:
     return [(f, getattr(features, f)) for f, known in KNOWN_CATEGORIES.items() if getattr(features, f) not in known]
 
 
-class ApproveRequest(BaseModel):
-    """Which challenger version the approver was looking at."""
+class VersionRequest(BaseModel):
+    """The registry version an approver or a rollback refers to."""
 
     version: str = Field(min_length=1, max_length=20, pattern=r"^\d+$", description="Registry version number")

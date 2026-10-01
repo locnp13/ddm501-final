@@ -6,6 +6,7 @@ from typing import Any
 
 import mlflow.artifacts
 import pandas as pd
+from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 
 FIGURES = ("calibration.png", "profit_curve.png")
@@ -16,12 +17,19 @@ METRIC_KEYS = (
 ECONOMICS_KEYS = ("value_months", "retention_cost_rate", "retention_success")
 
 
-def parse_alias_uri(uri: str) -> tuple[str, str] | None:
-    """Split `models:/name@alias` into (name, alias); other URI forms are not described."""
-    if not uri.startswith("models:/") or "@" not in uri:
+def parse_model_uri(uri: str) -> tuple[str, str | None, str | None] | None:
+    """Split `models:/name@alias` or `models:/name/<version>` into (name, alias, version).
+
+    Exactly one of alias and version is set. Other forms (such as stages) are not described.
+    """
+    if not uri.startswith("models:/"):
         return None
-    name, alias = uri.removeprefix("models:/").split("@", 1)
-    return name, alias
+    rest = uri.removeprefix("models:/")
+    if "@" in rest:
+        name, alias = rest.split("@", 1)
+        return name, alias, None
+    name, _, version = rest.partition("/")
+    return (name, None, version) if version.isdigit() else None
 
 
 def _number(value: str) -> Any:
@@ -38,12 +46,14 @@ def _number(value: str) -> Any:
 
 def load_model_info(uri: str) -> dict[str, Any] | None:
     """Collect what the UI shows about the model behind `uri`, or None if it cannot be described."""
-    parsed = parse_alias_uri(uri)
+    parsed = parse_model_uri(uri)
     if parsed is None:
         return None
-    name, alias = parsed
+    name, alias, pinned_version = parsed
     client = MlflowClient()
-    version = client.get_model_version_by_alias(name, alias)
+    version = (
+        client.get_model_version_by_alias(name, alias) if alias else client.get_model_version(name, pinned_version)
+    )
     run = client.get_run(version.run_id)
     params = run.data.params
 
@@ -75,6 +85,34 @@ def load_model_info(uri: str) -> dict[str, Any] | None:
             key=lambda c: -c["cv_pr_auc"],
         ),
     }
+
+
+def list_versions(name: str) -> list[dict[str, Any]]:
+    """Every registered version, newest first, with its headline metrics, aliases and approval history."""
+    client = MlflowClient()
+    # search_model_versions leaves `aliases` empty, so read them from the registered model.
+    aliases: dict[str, list[str]] = {}
+    for alias, version in client.get_registered_model(name).aliases.items():
+        aliases.setdefault(str(version), []).append(alias)
+    rows = []
+    for v in client.search_model_versions(f"name='{name}'"):
+        try:
+            run = client.get_run(v.run_id)
+            metrics, params = run.data.metrics, run.data.params
+        except MlflowException:  # the run was deleted; the version still exists
+            metrics, params = {}, {}
+        rows.append(
+            {
+                "version": str(v.version),
+                "aliases": sorted(aliases.get(str(v.version), [])),
+                "created_at": v.creation_timestamp,
+                "approved_at": v.tags.get("approved_at"),
+                "restored_at": v.tags.get("restored_at"),
+                "algorithm": params.get("selected.model"),
+                **{k: metrics.get(k) for k in ("pr_auc", "roc_auc", "brier", "best_profit")},
+            }
+        )
+    return sorted(rows, key=lambda r: -int(r["version"]))
 
 
 def load_figure(run_id: str, name: str) -> bytes:

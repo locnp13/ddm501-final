@@ -70,6 +70,7 @@ const labelOf = (field, value) => (field.options?.find(([v]) => v === String(val
 
 let modelInfo = null; // GET /v1/model, null until loaded or when no model
 let challenger = null; // GET /v1/model/challenger, null when nothing awaits approval
+let versions = []; // GET /v1/model/versions, newest first
 
 // ---------- tabs ----------
 function showTab(name) {
@@ -329,6 +330,36 @@ async function loadChallenger() {
   return challenger;
 }
 
+async function loadVersions() {
+  try {
+    const res = await fetch(`${API}/v1/model/versions`);
+    versions = res.ok ? await res.json() : [];
+  } catch { versions = []; }
+  return versions;
+}
+
+function historyCard(list, serving) {
+  if (!list.length) return "";
+  const canChange = !serving || serving.alias !== null; // an instance pinned to one version cannot switch
+  const when = (t) => (t ? new Date(t).toLocaleString("vi-VN") : "—");
+  const rows = list.map((v) => {
+    const isChampion = v.aliases.includes("champion"), isChallenger = v.aliases.includes("challenger");
+    const status = isChampion ? '<span class="badge low">đang phục vụ</span>' : isChallenger ? '<span class="badge mid">chờ duyệt</span>' : '<span class="muted">đã lưu</span>';
+    const action = isChampion ? "" : isChallenger ? '<span class="muted">duyệt ở trên</span>'
+      : (canChange ? `<button class="btn" data-rollback="${esc(v.version)}">Khôi phục</button>` : "");
+    return `<tr><td><b>v${esc(v.version)}</b></td><td>${status}</td>
+      <td class="num">${v.pr_auc != null ? v.pr_auc.toFixed(4) : "—"}</td><td class="num">${v.brier != null ? v.brier.toFixed(4) : "—"}</td>
+      <td class="num">${v.best_profit != null ? money(v.best_profit) : "—"}</td>
+      <td>${when(v.created_at)}</td><td>${v.restored_at ? `khôi phục ${when(v.restored_at)}` : (v.approved_at ? `duyệt ${when(v.approved_at)}` : "—")}</td>
+      <td>${action}</td></tr>`;
+  }).join("");
+  return `<div class="card">
+    <div class="spread"><h2 style="margin:0">Lịch sử phiên bản</h2><span class="muted">Đang lưu ${list.length} phiên bản</span></div>
+    <p class="muted" style="margin:6px 0 14px">Mọi phiên bản đã đăng ký đều được giữ lại. Khôi phục một bản cũ sẽ phục vụ nó ngay (cần khóa quản trị); model được nạp và chạy thử trước khi đổi.</p>
+    <div class="table-wrap"><table><thead><tr><th>Phiên bản</th><th>Trạng thái</th><th class="num">PR-AUC</th><th class="num">Brier</th><th class="num">Lợi nhuận</th><th>Tạo lúc</th><th>Duyệt / khôi phục</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`;
+}
+
 // metric, label, formatter, whether a higher value is better
 const COMPARE = [
   ["pr_auc", "PR-AUC (chỉ số chính)", (v) => v.toFixed(4), true],
@@ -374,10 +405,11 @@ function pendingCard(cur, cand) {
 async function renderModel() {
   const box = $("#model-content");
   const info = modelInfo ?? await loadModel();
-  await loadChallenger();
+  await Promise.all([loadChallenger(), loadVersions()]);
   const pending = challenger ? pendingCard(info, challenger) : "";
+  const history = historyCard(versions, info);
   if (!info) {
-    box.innerHTML = `${pending}<div class="card placeholder">Chưa có thông tin mô hình. Hãy huấn luyện (<span class="mono">dvc repro</span>), duyệt model (<span class="mono">python -m src.training.promote</span>) rồi khởi động lại API.</div>`;
+    box.innerHTML = `${pending}${history}<div class="card placeholder">Chưa có thông tin mô hình. Hãy huấn luyện (<span class="mono">dvc repro</span>), duyệt model (<span class="mono">python -m src.training.promote</span>) rồi khởi động lại API.</div>`;
     return;
   }
   const m = info.metrics, sel = info.selected, p = info.provenance;
@@ -397,6 +429,7 @@ async function renderModel() {
         ${stat(money(m.best_profit), "Lợi nhuận thực tế tối đa")}
       </div>
     </div>
+    ${history}
     <div class="grid-2">
       <div class="card">
         <h3>Lợi nhuận theo tỷ lệ khách được liên hệ</h3>
@@ -454,29 +487,39 @@ function toast(text) {
 function approveError(res, body) {
   if (res.status === 401) return "Khóa quản trị không đúng.";
   if (res.status === 503) return "Server chưa cấu hình ADMIN_KEY nên chức năng duyệt đang tắt.";
-  if (res.status === 404) return "Không còn model nào chờ duyệt. Hãy tải lại trang.";
+  if (res.status === 404) return "Không tìm thấy phiên bản hoặc model chờ duyệt. Hãy tải lại trang.";
+  if (res.status === 422) return typeof body.detail === "string" ? body.detail : "Phiên bản này không tương thích với API hiện tại.";
   return typeof body.detail === "string" ? body.detail : `Lỗi ${res.status}`;
 }
-$("#model-content").addEventListener("click", (e) => {
-  const btn = e.target.closest("#approve-open");
-  if (!btn) return;
+function openDialog(action, version) {
   const from = modelInfo ? `v${modelInfo.version}` : "chưa có model";
-  $("#approve-summary").innerHTML = `Bạn sắp thay model đang phục vụ (<b>${esc(from)}</b>) bằng <b>v${esc(btn.dataset.version)}</b>. Từ lúc xác nhận, mọi dự đoán sẽ dùng model mới.`;
+  const restoring = action === "rollback";
+  $("#approve-title").textContent = restoring ? "Khôi phục model cũ" : "Duyệt model đưa vào phục vụ";
+  $("#approve-confirm").textContent = restoring ? "Xác nhận khôi phục" : "Xác nhận duyệt";
+  $("#approve-summary").innerHTML = restoring
+    ? `Bạn sắp quay về <b>v${esc(version)}</b> thay cho model đang phục vụ (<b>${esc(from)}</b>). Từ lúc xác nhận, mọi dự đoán sẽ dùng bản cũ này. Model đang chờ duyệt (nếu có) không bị ảnh hưởng.`
+    : `Bạn sắp thay model đang phục vụ (<b>${esc(from)}</b>) bằng <b>v${esc(version)}</b>. Từ lúc xác nhận, mọi dự đoán sẽ dùng model mới.`;
   $("#approve-error").hidden = true;
   $("#approve-key").value = "";
-  dialog.dataset.version = btn.dataset.version;
+  Object.assign(dialog.dataset, { action, version });
   dialog.showModal();
   $("#approve-key").focus();
+}
+$("#model-content").addEventListener("click", (e) => {
+  const approve = e.target.closest("#approve-open");
+  const rollback = e.target.closest("[data-rollback]");
+  if (approve) openDialog("promote", approve.dataset.version);
+  else if (rollback) openDialog("rollback", rollback.dataset.rollback);
 });
 $("#approve-cancel").addEventListener("click", () => dialog.close());
 $("#approve-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const confirm = $("#approve-confirm"), errBox = $("#approve-error");
   confirm.disabled = true;
-  confirm.textContent = "Đang duyệt…";
+  confirm.textContent = "Đang xử lý…";
   errBox.hidden = true;
   try {
-    const res = await fetch(`${API}/v1/model/promote`, {
+    const res = await fetch(`${API}/v1/model/${dialog.dataset.action}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Admin-Key": $("#approve-key").value },
       body: JSON.stringify({ version: dialog.dataset.version }),
@@ -484,19 +527,17 @@ $("#approve-form").addEventListener("submit", async (ev) => {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(approveError(res, body));
     modelInfo = body;
-    challenger = null;
-    $("#pending-dot").hidden = true;
     dialog.close();
     await renderModel();
     refreshStatus();
-    toast(`Đã duyệt: model v${body.version} đang phục vụ`);
+    toast(`${dialog.dataset.action === "rollback" ? "Đã khôi phục" : "Đã duyệt"}: model v${body.version} đang phục vụ`);
   } catch (err) {
     errBox.textContent = err.message;
     errBox.hidden = false;
   } finally {
     $("#approve-key").value = "";
     confirm.disabled = false;
-    confirm.textContent = "Xác nhận duyệt";
+    confirm.textContent = dialog.dataset.action === "rollback" ? "Xác nhận khôi phục" : "Xác nhận duyệt";
   }
 });
 

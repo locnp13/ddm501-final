@@ -112,7 +112,7 @@
         <section>
           <h2>Model mới được đưa vào phục vụ thế nào</h2>
           <p>Huấn luyện xong, model mới chỉ được <b>đề cử</b> (nhãn <span class="mono">challenger</span>) và <b>chưa phục vụ</b>. Tab <b>Mô hình</b> hiện chấm đỏ khi có model chờ duyệt. Người phụ trách xem bảng so sánh với model đang chạy, rồi bấm <b>Duyệt</b> và nhập khóa quản trị. Chỉ khi đó model mới được nạp và bắt đầu trả lời dự đoán, không cần khởi động lại hệ thống.</p>
-          <p>Mỗi lần duyệt được ghi lại trên MLflow (thời điểm duyệt) và đếm trong số liệu giám sát. Muốn quay lại bản cũ, đặt lại nhãn <span class="mono">champion</span> trên MLflow rồi khởi động lại API.</p>
+          <p>Mỗi lần duyệt được ghi lại trên MLflow (thời điểm duyệt) và đếm trong số liệu giám sát. Mọi phiên bản đã đăng ký đều được giữ lại; muốn quay lại bản cũ, vào bảng <b>Lịch sử phiên bản</b> bấm <b>Khôi phục</b> (cần khóa quản trị). Model cũ được nạp và chạy thử với dữ liệu mẫu trước khi đổi, nên bản không tương thích sẽ bị từ chối mà không ảnh hưởng gì.</p>
         </section>
         <section>
           <h2>Hạn chế cần biết</h2>

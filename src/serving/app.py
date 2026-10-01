@@ -16,23 +16,26 @@ from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
-from src.serving.model_info import FIGURES, load_figure, load_model_info
-from src.serving.schemas import ApproveRequest, CustomerFeatures, PredictResponse, unknown_categories
-from src.training.registry import CHALLENGER, CHAMPION, MODEL_NAME, promote
+from src.serving.model_info import FIGURES, list_versions, load_figure, load_model_info, parse_model_uri
+from src.serving.schemas import EXAMPLE, CustomerFeatures, PredictResponse, VersionRequest, unknown_categories
+from src.training.registry import CHALLENGER, CHAMPION, MODEL_NAME
 
 logger = logging.getLogger("churn-api")
 
 MODEL_URI = os.getenv("MODEL_URI", "models:/churn-model@champion")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "")  # empty disables model approval through the API
+# > 0: follow the registry alias, so several replicas converge after an approval or rollback.
+MODEL_POLL_SECONDS = float(os.getenv("MODEL_POLL_SECONDS", "0"))
 
 REQUESTS = Counter("churn_requests_total", "Requests by endpoint and status", ["endpoint", "status"])
 LATENCY = Histogram("churn_request_latency_seconds", "Request latency", ["endpoint"])
-PREDICTIONS = Counter("churn_predictions_total", "Predictions by class", ["label"])
+PREDICTIONS = Counter("churn_predictions_total", "Predictions by class and model version", ["label", "model_version"])
 CHURN_PROBABILITY = Histogram(
-    "churn_probability", "Predicted churn probability", buckets=[i / 10 for i in range(11)]
+    "churn_probability", "Predicted churn probability", ["model_version"], buckets=[i / 10 for i in range(11)]
 )
 MODEL_LOADED = Gauge("churn_model_loaded", "1 if a model is loaded, else 0")
-MODEL_PROMOTIONS = Counter("churn_model_promotions_total", "Models approved to champion through the API")
+MODEL_INFO = Gauge("churn_model_info", "1 for the model version this instance serves", ["version"])
+MODEL_CHANGES = Counter("churn_model_changes_total", "Model switches by kind", ["kind"])
 UNKNOWN_CATEGORY = Counter(
     "churn_unknown_category_total", "Requests with a category never seen in training", ["field"]
 )
@@ -41,22 +44,80 @@ state: dict[str, Any] = {"model": None, "info": None, "figures": {}}
 promote_lock = threading.Lock()
 
 
+def is_pinned() -> bool:
+    """True when MODEL_URI names one version (models:/churn-model/3) instead of an alias.
+
+    A pinned instance never follows or changes the registry; this is how canary and A/B
+    deployments run two versions side by side.
+    """
+    parsed = parse_model_uri(MODEL_URI)
+    return parsed is not None and parsed[1] is None
+
+
+def set_served(model: Any, info: dict[str, Any] | None) -> None:
+    """Make `model` the one answering requests and refresh the gauges that describe it."""
+    state.update(model=model, info=info, figures={})
+    MODEL_LOADED.set(1 if model is not None else 0)
+    MODEL_INFO.clear()
+    if info is not None:
+        MODEL_INFO.labels(info["version"]).set(1)
+
+
+def served_version() -> str:
+    """Registry version this instance serves, for labels and responses."""
+    return state["info"]["version"] if state["info"] else "unknown"
+
+
+def sync_champion() -> bool:
+    """Follow the registry: reload when the alias in MODEL_URI points at another version.
+
+    Returns True if the model changed. Does nothing for an instance pinned to a version.
+    """
+    parsed = parse_model_uri(MODEL_URI)
+    if parsed is None or is_pinned():
+        return False
+    import mlflow.pyfunc
+
+    with promote_lock:
+        current = str(MlflowClient().get_model_version_by_alias(parsed[0], parsed[1]).version)
+        if state["info"] is not None and state["info"]["version"] == current:
+            return False
+        model = mlflow.pyfunc.load_model(f"models:/{parsed[0]}/{current}")
+        set_served(model, load_model_info(MODEL_URI))
+        MODEL_CHANGES.labels("sync").inc()
+        logger.info("Following %s: now serving v%s", MODEL_URI, current)
+        return True
+
+
+def _follow_registry(stop: threading.Event) -> None:
+    while not stop.wait(MODEL_POLL_SECONDS):
+        try:
+            sync_champion()
+        except Exception as exc:  # the registry may be briefly unreachable; keep serving what we have
+            logger.warning("Registry sync failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Try to load the registered model; the API stays up without one."""
+    model = info = None
     try:
         import mlflow.pyfunc
 
-        state["model"] = mlflow.pyfunc.load_model(MODEL_URI)
+        model = mlflow.pyfunc.load_model(MODEL_URI)
         logger.info("Loaded model %s", MODEL_URI)
     except Exception as exc:  # model may not be trained/registered yet
         logger.warning("No model loaded (%s): %s", MODEL_URI, exc)
     try:
-        state["info"] = load_model_info(MODEL_URI)
+        info = load_model_info(MODEL_URI)
     except Exception as exc:  # the UI model page degrades gracefully
         logger.warning("No model info (%s): %s", MODEL_URI, exc)
-    MODEL_LOADED.set(1 if state["model"] is not None else 0)
+    set_served(model, info)
+    stop = threading.Event()
+    if MODEL_POLL_SECONDS > 0 and not is_pinned():
+        threading.Thread(target=_follow_registry, args=(stop,), daemon=True).start()
     yield
+    stop.set()
 
 
 app = FastAPI(title="Churn Prediction API", version="0.1.0", lifespan=lifespan)
@@ -97,13 +158,13 @@ def predict(features: CustomerFeatures) -> PredictResponse:
         unknown = unknown_categories(features)
         for field, _ in unknown:
             UNKNOWN_CATEGORY.labels(field).inc()
-        PREDICTIONS.labels("churn" if prob >= 0.5 else "stay").inc()
-        CHURN_PROBABILITY.observe(prob)
+        version = served_version()
+        PREDICTIONS.labels("churn" if prob >= 0.5 else "stay", version).inc()
+        CHURN_PROBABILITY.labels(version).observe(prob)
         REQUESTS.labels("predict", "200").inc()
-        version = state["info"]["version"] if state["info"] else None
         return PredictResponse(
             churn_probability=prob,
-            model_version=version,
+            model_version=version if version != "unknown" else None,
             warnings=[f"{field}: unseen category {value!r}" for field, value in unknown],
         )
     except HTTPException as exc:
@@ -145,18 +206,65 @@ def challenger_info() -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="No model is waiting for approval") from exc
 
 
-@app.post("/v1/model/promote")
-def approve_challenger(body: ApproveRequest, x_admin_key: str | None = Header(default=None)) -> dict[str, Any]:
-    """Approve the challenger: load it, make it the champion and start serving it.
-
-    Needs the admin key. `version` must still be the current challenger, so an approval always
-    applies to the model the approver was looking at. The model is loaded before the alias moves,
-    so a model that cannot be loaded never becomes the champion.
-    """
+def _require_admin(key: str | None) -> None:
     if not ADMIN_KEY:
         raise HTTPException(status_code=503, detail="Approval is disabled: ADMIN_KEY is not configured")
-    if not x_admin_key or not hmac.compare_digest(x_admin_key.encode(), ADMIN_KEY.encode()):
+    if not key or not hmac.compare_digest(key.encode(), ADMIN_KEY.encode()):
         raise HTTPException(status_code=401, detail="Invalid admin key")
+    if is_pinned():
+        raise HTTPException(
+            status_code=409, detail=f"This instance is pinned to {MODEL_URI}; deploy another version instead"
+        )
+
+
+def _activate(client: MlflowClient, version: str, kind: str, tag: str) -> dict[str, Any]:
+    """Serve `version` and make it the champion. The registry is only touched after the model proved usable.
+
+    The model must load and score a sample customer with the current API schema; otherwise
+    nothing changes. Caller holds `promote_lock`.
+    """
+    import mlflow.pyfunc
+
+    try:
+        model = mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}/{version}")
+        info = load_model_info(f"models:/{MODEL_NAME}/{version}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"v{version} cannot be loaded, nothing changed: {exc}") from exc
+    try:
+        model.predict(pd.DataFrame([EXAMPLE]).astype({"TotalCharges": "float64"}))
+    except Exception as exc:
+        detail = f"v{version} does not accept the current input schema, nothing changed: {exc}"
+        raise HTTPException(status_code=422, detail=detail) from exc
+    client.set_registered_model_alias(MODEL_NAME, CHAMPION, version)
+    try:
+        if str(client.get_model_version_by_alias(MODEL_NAME, CHALLENGER).version) == version:
+            client.delete_registered_model_alias(MODEL_NAME, CHALLENGER)
+    except MlflowException:
+        pass  # no challenger waiting
+    client.set_model_version_tag(MODEL_NAME, version, tag, datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    set_served(model, {**info, "alias": CHAMPION})
+    MODEL_CHANGES.labels(kind).inc()
+    logger.info("Model v%s now served as %s (%s)", version, CHAMPION, kind)
+    return state["info"]
+
+
+@app.get("/v1/model/versions")
+def model_versions() -> list[dict[str, Any]]:
+    """All registered versions, newest first, with metrics, aliases and approval history."""
+    try:
+        return list_versions(MODEL_NAME)
+    except MlflowException as exc:
+        raise HTTPException(status_code=503, detail=f"Registry unavailable: {exc}") from exc
+
+
+@app.post("/v1/model/promote")
+def approve_challenger(body: VersionRequest, x_admin_key: str | None = Header(default=None)) -> dict[str, Any]:
+    """Approve the challenger: make it the champion and start serving it.
+
+    Needs the admin key. `version` must still be the current challenger, so an approval always
+    applies to the model the approver was looking at.
+    """
+    _require_admin(x_admin_key)
     with promote_lock:
         client = MlflowClient()
         try:
@@ -168,20 +276,19 @@ def approve_challenger(body: ApproveRequest, x_admin_key: str | None = Header(de
                 status_code=409,
                 detail=f"The challenger is now v{current.version}, not v{body.version}; reload the page",
             )
-        try:
-            import mlflow.pyfunc
+        return _activate(client, body.version, "approve", "approved_at")
 
-            model = mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}/{body.version}")
-            info = load_model_info(f"models:/{MODEL_NAME}@{CHALLENGER}")
-        except Exception as exc:
-            detail = f"v{body.version} cannot be loaded, alias unchanged: {exc}"
-            raise HTTPException(status_code=500, detail=detail) from exc
-        promote(client, body.version)
-        client.set_model_version_tag(
-            MODEL_NAME, body.version, "approved_at", datetime.now(timezone.utc).isoformat(timespec="seconds")
-        )
-        state.update(model=model, info={**info, "alias": CHAMPION}, figures={})
-        MODEL_LOADED.set(1)
-        MODEL_PROMOTIONS.inc()
-        logger.info("Model v%s approved and now served as %s", body.version, CHAMPION)
-        return state["info"]
+
+@app.post("/v1/model/rollback")
+def restore_version(body: VersionRequest, x_admin_key: str | None = Header(default=None)) -> dict[str, Any]:
+    """Serve an earlier registered version again by pointing the champion alias at it. Needs the admin key."""
+    _require_admin(x_admin_key)
+    with promote_lock:
+        client = MlflowClient()
+        try:
+            client.get_model_version(MODEL_NAME, body.version)
+        except MlflowException as exc:
+            raise HTTPException(status_code=404, detail=f"Version {body.version} does not exist") from exc
+        if state["info"] is not None and state["info"]["version"] == body.version:
+            raise HTTPException(status_code=409, detail=f"v{body.version} is already the champion")
+        return _activate(client, body.version, "rollback", "restored_at")

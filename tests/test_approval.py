@@ -85,7 +85,70 @@ def test_approval_serves_the_new_model_without_restart(client, pending) -> None:
     assert "approved_at" in pending.get_model_version(MODEL_NAME, "2").tags
     assert client.get("/v1/model").json()["version"] == "2"
     assert client.post("/v1/predict", json=features()).json()["model_version"] == "2"
-    assert "churn_model_promotions_total 1.0" in client.get("/metrics").text
+    assert 'churn_model_changes_total{kind="approve"} 1.0' in client.get("/metrics").text
     assert client.get("/v1/model/challenger").status_code == 404
     again = client.post("/v1/model/promote", json={"version": "2"}, headers={"X-Admin-Key": KEY})
     assert again.status_code == 404  # nothing left to approve
+
+
+def test_version_history_lists_every_version(client) -> None:
+    versions = client.get("/v1/model/versions").json()
+    assert [v["version"] for v in versions] == ["2", "1"]  # newest first, nothing deleted
+    assert versions[0]["aliases"] == [CHAMPION] and versions[0]["approved_at"]
+    assert versions[1]["aliases"] == [] and versions[1]["pr_auc"] is not None
+
+
+def test_rollback_needs_the_key_and_a_real_other_version(client, pending) -> None:
+    body = {"version": "1"}
+    assert client.post("/v1/model/rollback", json=body).status_code == 401
+    assert client.post("/v1/model/rollback", json={"version": "99"}, headers={"X-Admin-Key": KEY}).status_code == 404
+    assert client.post("/v1/model/rollback", json={"version": "2"}, headers={"X-Admin-Key": KEY}).status_code == 409
+    assert alias_version(pending, CHAMPION) == "2"
+
+
+def test_incompatible_version_is_refused_and_nothing_changes(client, pending, monkeypatch) -> None:
+    class Broken:
+        def predict(self, _):
+            raise ValueError("columns do not match")
+
+    monkeypatch.setattr(mlflow.pyfunc, "load_model", lambda uri: Broken())
+    res = client.post("/v1/model/rollback", json={"version": "1"}, headers={"X-Admin-Key": KEY})
+    assert res.status_code == 422 and "nothing changed" in res.json()["detail"]
+    assert alias_version(pending, CHAMPION) == "2"
+
+
+def test_rollback_serves_the_older_version_at_once(client, pending) -> None:
+    res = client.post("/v1/model/rollback", json={"version": "1"}, headers={"X-Admin-Key": KEY})
+    assert res.status_code == 200, res.text
+    assert alias_version(pending, CHAMPION) == "1"
+    assert "restored_at" in pending.get_model_version(MODEL_NAME, "1").tags
+    assert client.post("/v1/predict", json=features()).json()["model_version"] == "1"
+    metrics = client.get("/metrics").text
+    assert 'churn_model_changes_total{kind="rollback"} 1.0' in metrics
+    assert 'churn_model_info{version="1"} 1.0' in metrics and 'churn_model_info{version="2"}' not in metrics
+    assert [v["aliases"] for v in client.get("/v1/model/versions").json()] == [[], [CHAMPION]]
+
+
+def test_replicas_follow_the_registry_alias(client, pending) -> None:
+    assert client.get("/v1/model").json()["version"] == "1"
+    assert app_module.sync_champion() is False  # nothing moved
+    pending.set_registered_model_alias(MODEL_NAME, CHAMPION, "2")  # changed elsewhere, e.g. the MLflow UI
+    assert app_module.sync_champion() is True
+    assert client.get("/v1/model").json()["version"] == "2"
+    assert client.post("/v1/predict", json=features()).json()["model_version"] == "2"
+    assert app_module.sync_champion() is False
+
+
+def test_pinned_instance_serves_one_version_and_cannot_change_it(pending, monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "MODEL_URI", f"models:/{MODEL_NAME}/1")
+    monkeypatch.setattr(app_module, "ADMIN_KEY", KEY)
+    app_module.state.update({"model": None, "info": None, "figures": {}})
+    with TestClient(app_module.app) as c:
+        info = c.get("/v1/model").json()
+        assert info["version"] == "1" and info["alias"] is None
+        assert c.post("/v1/predict", json=features()).json()["model_version"] == "1"
+        for path in ("/v1/model/promote", "/v1/model/rollback"):
+            res = c.post(path, json={"version": "2"}, headers={"X-Admin-Key": KEY})
+            assert res.status_code == 409 and "pinned" in res.json()["detail"]
+        assert app_module.sync_champion() is False
+    assert alias_version(pending, CHAMPION) == "2"
