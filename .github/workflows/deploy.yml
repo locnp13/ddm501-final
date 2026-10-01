@@ -37,7 +37,8 @@ jobs:
             sleep 5
           done
           echo "::error title=Self-hosted runner is not running::No runner with label churn-local took the job within 60s. On the Mac: cd ~/actions-runner-ddm501 && ./svc.sh start (and check Docker Desktop is open)."
-          gh run cancel "$GITHUB_RUN_ID"
+          # This job has no checkout, so use the API: `gh run cancel` would not know which repository.
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"
           exit 1
 
   deploy:
