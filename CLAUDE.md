@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Git repo (origin `github.com/locnp13/ddm501-final`, branch `main`). Training pipeline, API skeleton, Compose stack and CI exist; see `README.md` for status and `docs/open-questions.md` for undecided points. Still missing: Grafana dashboards, SHAP/LIME, fairness analysis, API integration tests, coverage >80%, CI deploy step.
+Git repo (origin `github.com/locnp13/ddm501-final`, branch `main`). Training pipeline, API skeleton, Compose stack and CI exist; see `README.md` for status and `docs/open-questions.md` for undecided points. Still missing: Grafana dashboards, SHAP/LIME, fairness analysis, API schema validation and batch endpoint, CI deploy step.
 
 ## Commands
 
 Everything runs in Docker; no Python install on the host is needed.
 
-- Start stack: `docker compose up -d --build` (MLflow on host port 5001, MinIO 9000/9001, API 8000, Prometheus 9090, Grafana 3000)
+- Start stack: `docker compose up -d --build` (MLflow on host port 5001, MinIO 9000/9001, API 8000, web UI 8080, Prometheus 9090, Grafana 3000)
 - Train (DVC: `ingest` then `train`; compares 4 models x feature sets x sensitive-column setting by CV, tunes XGBoost, calibrates, and if the 3-part gate passes registers the model with alias `challenger`): `GIT_COMMIT=$(git rev-parse HEAD) GIT_DIRTY=$(git status --porcelain | wc -l) docker compose run --rm trainer dvc repro` (the env vars tag the MLflow run for reproducibility)
 - Approve a model (human step): `docker compose run --rm trainer python -m src.training.promote [VERSION]` sets alias `champion`; the API serves `models:/churn-model@champion`
 - Reload model in API (loaded only at startup): `docker compose restart api`
@@ -19,7 +19,7 @@ Everything runs in Docker; no Python install on the host is needed.
 
 ## Architecture
 
-`src/training/data.py` (download, Pandera schema, clean) -> `features.py` (in-pipeline feature engineering), `business.py` (profit/Recall@k), `registry.py` (gate, aliases, provenance), `train.py` (CV comparison, Optuna, isotonic calibration, MLflow logging, Evidently report) -> `model.py` (pyfunc wrapper returning P(churn)). `src/serving/app.py` loads `models:/churn-model@champion` and exposes `/v1/predict`, `/health`, `/metrics`. MLflow metadata is in Postgres and artifacts in MinIO (`mlflow` bucket). Pin xgboost/scikit-learn identically in `requirements.txt` (API) and `requirements-train.txt` (trainer) or the model will not load.
+`src/training/data.py` (download, Pandera schema, clean) -> `features.py` (in-pipeline feature engineering), `business.py` (profit/Recall@k), `registry.py` (gate, aliases, provenance), `train.py` (CV comparison, Optuna, isotonic calibration, MLflow logging, Evidently report) -> `model.py` (pyfunc wrapper returning P(churn)). `src/serving/app.py` loads `models:/churn-model@champion` and exposes `/v1/predict`, `/v1/model`, `/health`, `/metrics`. `frontend/` is an nginx container serving a static UI (plain HTML/CSS/JS) that calls the API through its `/api` proxy; `src/serving/model_info.py` builds the model description the UI shows from the MLflow registry. MLflow metadata is in Postgres and artifacts in MinIO (`mlflow` bucket). Pin xgboost/scikit-learn identically in `requirements.txt` (API) and `requirements-train.txt` (trainer) or the model will not load.
 
 ## What the project is
 

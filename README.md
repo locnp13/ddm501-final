@@ -46,6 +46,7 @@ Sơ đồ chi tiết: [`docs/mlops-flow.html`](docs/mlops-flow.html). Đặc t�
 | `minio` | Object storage S3: bucket `mlflow` (artifact/model) và `dvc` (remote dữ liệu) | 9000 (S3), 9001 (console) |
 | `mlflow` | Tracking server + Model Registry | 5001 |
 | `api` | FastAPI phục vụ dự đoán | 8000 |
+| `frontend` | Giao diện web (nginx, trang tĩnh): dự đoán, lịch sử, thông tin mô hình, tài liệu; proxy `/api` sang `api` | 8080 |
 | `trainer` | Chạy pipeline huấn luyện (profile `train`) | - |
 | `prometheus` | Thu thập metric, đánh giá alert rules | 9090 |
 | `grafana` | Dashboard | 3000 |
@@ -71,6 +72,7 @@ docker compose restart api
 
 Sau đó:
 
+- Giao diện web: http://localhost:8080 (tab Dự đoán, Lịch sử, Mô hình, Tài liệu)
 - MLflow UI: http://localhost:5001
 - Swagger UI: http://localhost:8000/docs
 - MinIO console: http://localhost:9001 (mặc định `minioadmin` / `minioadmin`, đổi bằng biến `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`)
@@ -94,6 +96,8 @@ curl -X POST http://localhost:8000/v1/predict \
 ```
 
 Khi chưa có model mang alias `champion`, `/v1/predict` trả `503 Model not loaded`. Đây là hành vi có chủ đích.
+
+API còn có `GET /v1/model` (phiên bản, chỉ số, cấu hình được chọn, nguồn gốc, đường cong lợi nhuận, so sánh cấu hình) và `GET /v1/model/figures/{calibration.png|profit_curve.png}`; giao diện web dùng các endpoint này.
 
 ## Pipeline huấn luyện
 
@@ -139,7 +143,8 @@ GitHub Actions (`.github/workflows/ci.yml`) chạy khi push lên `main` và khi 
 
 ```
 src/training/     ingest, validate, train, wrapper model
-src/serving/      FastAPI app
+src/serving/      FastAPI app, thông tin model cho giao diện
+frontend/         giao diện web (nginx + HTML/CSS/JS thuần)
 deploy/           Dockerfile cho api, mlflow, trainer
 monitoring/       Prometheus, alert rules, Grafana provisioning
 tests/            test dữ liệu và quality gate

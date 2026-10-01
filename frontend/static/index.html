@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Churn Predictor</title>
+  <meta name="description" content="Dự đoán khả năng khách hàng rời bỏ dịch vụ và xem thông tin mô hình.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%232b59d6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' d='M3 17l6-6 4 4 8-8'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+      Churn Predictor
+    </div>
+    <nav id="tabs" role="tablist" aria-label="Các mục">
+      <button role="tab" data-tab="predict" aria-selected="true">Dự đoán</button>
+      <button role="tab" data-tab="history" aria-selected="false">Lịch sử <span id="history-count" class="muted"></span></button>
+      <button role="tab" data-tab="model" aria-selected="false">Mô hình</button>
+      <button role="tab" data-tab="docs" aria-selected="false">Tài liệu</button>
+    </nav>
+    <div class="status" role="status"><span id="status-dot" class="dot"></span><span id="status-text">Đang kiểm tra API…</span></div>
+  </header>
+
+  <main>
+    <section id="tab-predict" class="tab" role="tabpanel">
+      <div class="grid-2">
+        <form id="form" class="card" novalidate>
+          <div class="spread" style="margin-bottom:14px">
+            <div>
+              <h2>Thông tin khách hàng</h2>
+              <p class="muted" style="margin:0">Điền thông tin rồi bấm Dự đoán, hoặc dùng một khách mẫu.</p>
+            </div>
+            <div class="row">
+              <button type="button" class="btn" data-sample="high">Khách mẫu: rủi ro cao</button>
+              <button type="button" class="btn" data-sample="low">Khách mẫu: rủi ro thấp</button>
+            </div>
+          </div>
+          <div id="form-groups"></div>
+          <div class="row">
+            <button type="submit" class="btn primary" id="submit">Dự đoán</button>
+            <button type="reset" class="btn" id="reset">Đặt lại</button>
+          </div>
+        </form>
+
+        <aside class="card result" aria-live="polite">
+          <h2>Kết quả</h2>
+          <div id="result"><div class="placeholder">Chưa có dự đoán. Điền thông tin và bấm Dự đoán.</div></div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="tab-history" class="tab" role="tabpanel" hidden>
+      <div class="card">
+        <div class="spread" style="margin-bottom:12px">
+          <div>
+            <h2>Lịch sử dự đoán</h2>
+            <p class="muted" style="margin:0">Lưu trong trình duyệt này (tối đa 100 lần gần nhất). Bấm vào một dòng để nạp lại thông tin vào form.</p>
+          </div>
+          <div class="row">
+            <button class="btn" id="export">Xuất CSV</button>
+            <button class="btn" id="clear">Xóa lịch sử</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Thời gian</th><th class="num">Xác suất rời</th><th>Mức rủi ro</th><th>Hợp đồng</th><th class="num">Tenure</th><th class="num">Cước/tháng</th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table></div>
+        <p id="history-empty" class="placeholder" hidden>Chưa có lần dự đoán nào.</p>
+      </div>
+    </section>
+
+    <section id="tab-model" class="tab" role="tabpanel" hidden>
+      <div id="model-content" class="stack"><div class="card placeholder">Đang tải thông tin mô hình…</div></div>
+    </section>
+
+    <section id="tab-docs" class="tab" role="tabpanel" hidden>
+      <article class="card doc">
+        <section>
+          <h2>Sản phẩm này làm gì</h2>
+          <p>Churn Predictor ước tính <b>xác suất một khách hàng sẽ rời bỏ dịch vụ</b> trong thời gian tới, dựa trên hồ sơ, dịch vụ đang dùng và hợp đồng. Mục đích là giúp bộ phận chăm sóc khách hàng chọn đúng người để liên hệ giữ chân, thay vì liên hệ tất cả.</p>
+        </section>
+        <section>
+          <h2>Cách sử dụng</h2>
+          <ol>
+            <li>Vào tab <b>Dự đoán</b>, điền thông tin khách hàng (hoặc chọn một khách mẫu).</li>
+            <li>Bấm <b>Dự đoán</b>. Kết quả hiện ở bên phải: xác suất rời, mức rủi ro và gợi ý hành động.</li>
+            <li>Tab <b>Lịch sử</b> lưu các lần dự đoán để so sánh hoặc xuất CSV.</li>
+            <li>Tab <b>Mô hình</b> cho biết phiên bản đang chạy, độ chính xác và dữ liệu đã dùng để huấn luyện.</li>
+          </ol>
+        </section>
+        <section>
+          <h2>Đọc kết quả thế nào</h2>
+          <p><b>Xác suất rời</b> là xác suất đã được hiệu chuẩn: trong số những khách được chấm 30%, khoảng 30% thật sự rời đi. Con số này dùng được để tính toán chi phí, không chỉ để xếp hạng.</p>
+          <ul>
+            <li><b>Thấp</b>: dưới 60% ngưỡng hòa vốn, chưa cần hành động.</li>
+            <li><b>Trung bình</b>: gần ngưỡng hòa vốn, theo dõi.</li>
+            <li><b>Cao</b>: từ ngưỡng hòa vốn trở lên, liên hệ giữ chân có lợi nhuận kỳ vọng dương.</li>
+          </ul>
+          <p><b>Ngưỡng hòa vốn</b> = chi phí ưu đãi ÷ tỷ lệ giữ chân thành công. Với giả định hiện tại (ưu đãi bằng 10% doanh thu năm, giữ được 30% số khách được liên hệ) ngưỡng là 33%: dưới mức đó, chi phí ưu đãi lớn hơn giá trị kỳ vọng thu về.</p>
+        </section>
+        <section>
+          <h2>Dữ liệu và mô hình</h2>
+          <ul>
+            <li><b>Dữ liệu</b>: Telco Customer Churn (khoảng 7.000 khách, 26% rời đi). Dữ liệu thuộc ngành viễn thông và không có cột thời gian.</li>
+            <li><b>Mô hình</b>: so sánh Logistic Regression, Random Forest và XGBoost bằng cross-validation, chọn theo PR-AUC. Xác suất được hiệu chuẩn bằng isotonic regression.</li>
+            <li><b>Chỉ số chính</b>: PR-AUC, vì chỉ khoảng một phần tư khách rời đi nên accuracy dễ gây hiểu nhầm.</li>
+            <li>Chi tiết từng phiên bản, chỉ số và biểu đồ nằm ở tab <b>Mô hình</b>.</li>
+          </ul>
+        </section>
+        <section>
+          <h2>Hạn chế cần biết</h2>
+          <div class="note">
+            <ul style="margin:0">
+              <li>Các chỉ số lợi nhuận dựa trên <b>giả định chi phí</b>, không phải số liệu thật của doanh nghiệp.</li>
+              <li>Các mô hình khác nhau chênh nhau rất ít (trong vùng nhiễu), nên đừng diễn giải khác biệt nhỏ như có ý nghĩa.</li>
+              <li>Phiên bản hiện tại không dùng giới tính hay độ tuổi làm đầu vào, nhưng các biến khác vẫn có thể tương quan với nhóm đó (phân tích công bằng chi tiết đang được bổ sung).</li>
+              <li>Dự đoán chỉ hỗ trợ ra quyết định, không thay thế phán đoán của người chăm sóc khách hàng.</li>
+            </ul>
+          </div>
+        </section>
+        <section>
+          <h2>Liên kết</h2>
+          <div class="links" id="doc-links"></div>
+        </section>
+      </article>
+    </section>
+  </main>
+  <footer>Đồ án DDM501 · AI in Production</footer>
+  <script src="app.js"></script>
+</body>
+</html>

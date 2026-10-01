@@ -22,6 +22,11 @@ jobs:
   build:
     needs: lint-test
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - {name: api, context: ., file: deploy/Dockerfile.api}
+          - {name: frontend, context: frontend, file: frontend/Dockerfile}
     permissions:
       contents: read
       packages: write
@@ -34,14 +39,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build API image (push only on main)
+      - name: Build ${{ matrix.name }} image (push only on main)
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: deploy/Dockerfile.api
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: |
-            ghcr.io/${{ github.repository }}/api:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/${{ matrix.name }}:latest
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
