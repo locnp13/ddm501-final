@@ -32,7 +32,7 @@ spec:
               valueFrom:
                 secretKeyRef: {name: churn-secrets, key: ADMIN_KEY, optional: true}
           readinessProbe:
-            httpGet: {path: /health, port: http}
+            httpGet: {path: /ready, port: http}  # 503 until the model is loaded
             periodSeconds: 5
           livenessProbe:
             httpGet: {path: /health, port: http}

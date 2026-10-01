@@ -29,7 +29,7 @@ spec:
             # A version URI pins this instance: it never follows the alias and refuses approve/rollback.
             - {name: MODEL_URI, value: "models:/churn-model/2"}
           readinessProbe:
-            httpGet: {path: /health, port: http}
+            httpGet: {path: /ready, port: http}  # 503 until the model is loaded
             periodSeconds: 5
           livenessProbe:
             httpGet: {path: /health, port: http}

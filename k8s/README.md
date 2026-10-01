@@ -23,7 +23,31 @@ kubectl -n churn rollout status deploy/api
 kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8088:80
 ```
 
-Cập nhật code: build lại image (cùng tag `:dev`) rồi `kubectl -n churn rollout restart deploy/api deploy/frontend`.
+Cập nhật code bằng tay: `scripts/deploy-local.sh` (build image arm64 vào Docker của cụm, gắn tag theo commit, áp manifest, đợi cuốn bản mới và kiểm tra API có model).
+
+## Tự động deploy khi push
+
+Push vào `main` thì CI chạy `lint-test`, `build`, rồi job **`deploy`** chạy trên một runner cài ở máy này (nhãn `churn-local`) và gọi `scripts/deploy-local.sh <sha>`.
+
+```
+push main -> lint-test -> build (kiểm tra Dockerfile, đẩy GHCR) -> deploy (runner trên Mac)
+                                                                    build arm64 -> kubectl apply -> rollout -> smoke test
+```
+
+- **Image deploy được build lại trên runner**, không kéo từ GHCR: image CI build là amd64, còn cụm chạy arm64. Hệ quả: image chạy trên cụm không phải đúng tệp CI đã kiểm tra và đẩy lên GHCR.
+- **Điều kiện để chạy**: Mac bật và đăng nhập (runner là LaunchAgent), Docker Desktop đang chạy, và stack Compose (MLflow, MinIO, Postgres) đang chạy. Nếu cụm đang tắt, script tự `minikube start`. Thiếu một trong số đó thì job báo lỗi hoặc nằm chờ.
+- **Secret `churn-secrets` tạo tay một lần** (xem phần Dựng cụm); script không đụng tới nó.
+- **Cuốn bản mới an toàn**: pod chỉ nhận lưu lượng khi `/ready` trả 200, tức là đã nạp xong model, nên bản cũ không bị tắt trước khi bản mới sẵn sàng.
+- **Bảo mật**: runner trên repo public chạy mã của repo, nên job `deploy` chỉ chạy khi `push` vào `main`, và PR từ người ngoài phải được duyệt trước mới chạy workflow (đã đặt `all_external_contributors`). `main` chưa bật bảo vệ nhánh.
+
+Quản lý runner (cài ở `~/actions-runner-ddm501`):
+
+```bash
+cd ~/actions-runner-ddm501
+./svc.sh status | stop | start
+./svc.sh stop && ./svc.sh uninstall                      # gỡ dịch vụ
+./config.sh remove --token "$(gh api -X POST repos/locnp13/ddm501-final/actions/runners/registration-token --jq .token)"
+```
 
 ## Cấu trúc
 
@@ -47,6 +71,6 @@ kubectl delete -k k8s/canary                 # gỡ canary
 ## Những điều rút ra khi kiểm tra
 
 - **ingress-nginx chia canary theo Service, không theo đường dẫn.** Mọi Ingress trỏ tới Service `api` đều bị chia, kể cả đường dẫn quản trị. Canary là bản ghim nên từ chối duyệt/khôi phục, nên lúc đầu khoảng 20% lệnh duyệt bị từ chối. Vì vậy lệnh quản trị đi qua Service `api-admin` riêng; sau khi sửa, 120/120 yêu cầu quản trị vào đúng nhóm stable.
-- **Image là bản build local** (`churn-api:dev`, `imagePullPolicy: IfNotPresent`), không phải image trên GHCR. Chưa có luồng tự deploy: xem `docs/rollout-strategies.md`.
+- **Image là bản build local** (`churn-api:<commit>`, `imagePullPolicy: IfNotPresent`), không phải image trên GHCR. Luồng tự deploy xem phần trên.
 - **Prometheus của Compose chưa scrape pod trong cụm.** Pod có annotation `prometheus.io/*` nhưng chưa có gì đọc chúng.
 - `kubectl config` chuyển sang context `churn`. Context `minikube` cũ trong kubeconfig trỏ tới cụm không còn tồn tại và không bị đụng tới.

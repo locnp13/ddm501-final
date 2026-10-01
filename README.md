@@ -125,7 +125,7 @@ Image MinIO chính thức không còn được phát hành công khai, nên comp
 
 ## Kubernetes (local)
 
-`api` và `frontend` chạy được trên minikube, kèm canary theo trọng số; hướng dẫn và các lưu ý ở [`k8s/README.md`](k8s/README.md). Chưa có luồng tự deploy khi push code (CI hiện chỉ build và đẩy image lên GHCR).
+`api` và `frontend` chạy được trên minikube, kèm canary theo trọng số; hướng dẫn và các lưu ý ở [`k8s/README.md`](k8s/README.md). Push vào `main` thì CI tự deploy lên cụm này qua runner cài trên máy (xem phần Tự động deploy trong `k8s/README.md`).
 
 ## Giám sát
 

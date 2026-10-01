@@ -46,6 +46,10 @@ def test_health_reports_loaded_model(client) -> None:
     assert client.get("/health").json() == {"status": "ok", "model_loaded": True}
 
 
+def test_ready_requires_a_loaded_model(client) -> None:
+    assert client.get("/ready").json() == {"status": "ready", "model_version": "1"}
+
+
 def test_predict_returns_probability(client) -> None:
     res = client.post("/v1/predict", json=features())
     assert res.status_code == 200, res.text
@@ -167,5 +171,6 @@ def test_no_model_gives_503(tmp_path, monkeypatch) -> None:
     app_module.state.update({"model": None, "info": None, "figures": {}})
     with TestClient(app_module.app) as c:
         assert c.get("/health").json()["model_loaded"] is False
+        assert c.get("/ready").status_code == 503  # alive, but not ready for traffic
         assert c.post("/v1/predict", json=features()).status_code == 503
         assert c.get("/v1/model").status_code == 503

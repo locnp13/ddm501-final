@@ -129,6 +129,14 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "model_loaded": state["model"] is not None}
 
 
+@app.get("/ready")
+def ready() -> dict[str, Any]:
+    """Readiness probe: 200 only once a model is loaded, so a rollout never routes traffic to an empty pod."""
+    if state["model"] is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    return {"status": "ready", "model_version": served_version()}
+
+
 @app.get("/metrics")
 def metrics() -> Response:
     """Prometheus scrape endpoint."""
