@@ -56,6 +56,19 @@ MLflow dùng cổng 5001 vì cổng 5000 bị AirPlay Receiver chiếm trên mac
 
 Yêu cầu: Docker, Docker Compose, minikube và kubectl. Không cần cài Python lên máy host.
 
+### Khởi động nhanh bằng `run.sh`
+
+Sau khi đã cài đặt lần đầu (các bước bên dưới), mỗi lần dùng chỉ cần:
+
+```bash
+./run.sh        # bật dịch vụ nào chưa chạy, mở cổng 8088, mở các URL trong trình duyệt
+./run.sh stop   # tắt phần chuyển tiếp cổng (container và minikube vẫn chạy)
+```
+
+`run.sh` bật Docker Desktop, các container Compose (Postgres, MinIO, MLflow) và minikube nếu chưa chạy; deploy api, frontend và giám sát lên cụm nếu chưa có; chuyển tiếp cổng 8088 tới Ingress; rồi mở UI, Swagger, Grafana, Prometheus, Alertmanager, MLflow và MinIO. Script không huấn luyện hay duyệt model: nếu chưa có `champion` nó chỉ nhắc. Cần có `.env` (xem bước 0).
+
+### Cài đặt từng bước
+
 ```bash
 # 0. Tạo khóa quản trị dùng khi duyệt model trên giao diện (tệp .env không được commit)
 cp .env.example .env   # rồi đặt ADMIN_KEY và GRAFANA_ADMIN_PASSWORD, ví dụ: openssl rand -hex 24
@@ -72,8 +85,6 @@ GIT_COMMIT=$(git rev-parse HEAD) GIT_DIRTY=$(git status --porcelain | wc -l) \
 # 3. Duyệt model (bước của con người): mở http://localhost:8088, tab Mô hình, xem bảng so sánh rồi bấm Duyệt
 #    (cần ADMIN_KEY trong .env). API nạp model mới ngay, không cần restart.
 ```
-
-Sau lần cài đặt đầu, mỗi lần dùng chỉ cần chạy `./run.sh`: script bật Docker Desktop, các container Compose và minikube nếu chưa chạy, deploy lên cụm nếu chưa có, mở cổng 8088 ra máy rồi mở các URL bên dưới trong trình duyệt. `./run.sh stop` tắt phần chuyển tiếp cổng (container và minikube vẫn chạy). Script không huấn luyện hay duyệt model; nếu chưa có `champion` nó chỉ nhắc.
 
 Sau đó:
 
