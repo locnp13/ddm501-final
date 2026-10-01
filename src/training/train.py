@@ -297,7 +297,7 @@ def run_training(df: pd.DataFrame, params: dict) -> dict:
         "baseline_pr_auc": baseline_pr_auc,
         "passed": passed,
         "reasons": reasons,
-        "version": info.registered_model_version if passed else None,
+        "version": str(info.registered_model_version) if passed else None,
         "run_id": run.info.run_id,
     }
 
@@ -312,8 +312,10 @@ def main() -> None:
     if not outcome["passed"]:
         print("Quality gate failed: " + "; ".join(outcome["reasons"]), file=sys.stderr)
         raise SystemExit(1)
-    print(f"Registered {MODEL_NAME} v{outcome['version']} as {CHALLENGER} (run {outcome['run_id']}); "
-          f"approve with: python -m src.training.promote")
+    print(
+        f"Registered {MODEL_NAME} v{outcome['version']} as {CHALLENGER} (run {outcome['run_id']}). "
+        "It is not served until approved: use the Mô hình tab of the web UI, or python -m src.training.promote."
+    )
 
 
 if __name__ == "__main__":

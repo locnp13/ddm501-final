@@ -1,22 +1,29 @@
 """Churn prediction API: health, Prometheus metrics, and model-backed prediction."""
+import hmac
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
+from mlflow.exceptions import MlflowException
+from mlflow.tracking import MlflowClient
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from src.serving.model_info import FIGURES, load_figure, load_model_info
-from src.serving.schemas import CustomerFeatures, PredictResponse, unknown_categories
+from src.serving.schemas import ApproveRequest, CustomerFeatures, PredictResponse, unknown_categories
+from src.training.registry import CHALLENGER, CHAMPION, MODEL_NAME, promote
 
 logger = logging.getLogger("churn-api")
 
 MODEL_URI = os.getenv("MODEL_URI", "models:/churn-model@champion")
+ADMIN_KEY = os.getenv("ADMIN_KEY", "")  # empty disables model approval through the API
 
 REQUESTS = Counter("churn_requests_total", "Requests by endpoint and status", ["endpoint", "status"])
 LATENCY = Histogram("churn_request_latency_seconds", "Request latency", ["endpoint"])
@@ -25,11 +32,13 @@ CHURN_PROBABILITY = Histogram(
     "churn_probability", "Predicted churn probability", buckets=[i / 10 for i in range(11)]
 )
 MODEL_LOADED = Gauge("churn_model_loaded", "1 if a model is loaded, else 0")
+MODEL_PROMOTIONS = Counter("churn_model_promotions_total", "Models approved to champion through the API")
 UNKNOWN_CATEGORY = Counter(
     "churn_unknown_category_total", "Requests with a category never seen in training", ["field"]
 )
 
 state: dict[str, Any] = {"model": None, "info": None, "figures": {}}
+promote_lock = threading.Lock()
 
 
 @asynccontextmanager
@@ -125,3 +134,54 @@ def model_figure(name: str) -> Response:
     if name not in state["figures"]:
         state["figures"][name] = load_figure(state["info"]["run_id"], name)
     return Response(state["figures"][name], media_type="image/png")
+
+
+@app.get("/v1/model/challenger")
+def challenger_info() -> dict[str, Any]:
+    """The model waiting for approval (alias `challenger`), described like the served one."""
+    try:
+        return load_model_info(f"models:/{MODEL_NAME}@{CHALLENGER}")
+    except MlflowException as exc:
+        raise HTTPException(status_code=404, detail="No model is waiting for approval") from exc
+
+
+@app.post("/v1/model/promote")
+def approve_challenger(body: ApproveRequest, x_admin_key: str | None = Header(default=None)) -> dict[str, Any]:
+    """Approve the challenger: load it, make it the champion and start serving it.
+
+    Needs the admin key. `version` must still be the current challenger, so an approval always
+    applies to the model the approver was looking at. The model is loaded before the alias moves,
+    so a model that cannot be loaded never becomes the champion.
+    """
+    if not ADMIN_KEY:
+        raise HTTPException(status_code=503, detail="Approval is disabled: ADMIN_KEY is not configured")
+    if not x_admin_key or not hmac.compare_digest(x_admin_key.encode(), ADMIN_KEY.encode()):
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    with promote_lock:
+        client = MlflowClient()
+        try:
+            current = client.get_model_version_by_alias(MODEL_NAME, CHALLENGER)
+        except MlflowException as exc:
+            raise HTTPException(status_code=404, detail="No model is waiting for approval") from exc
+        if str(current.version) != body.version:
+            raise HTTPException(
+                status_code=409,
+                detail=f"The challenger is now v{current.version}, not v{body.version}; reload the page",
+            )
+        try:
+            import mlflow.pyfunc
+
+            model = mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}/{body.version}")
+            info = load_model_info(f"models:/{MODEL_NAME}@{CHALLENGER}")
+        except Exception as exc:
+            detail = f"v{body.version} cannot be loaded, alias unchanged: {exc}"
+            raise HTTPException(status_code=500, detail=detail) from exc
+        promote(client, body.version)
+        client.set_model_version_tag(
+            MODEL_NAME, body.version, "approved_at", datetime.now(timezone.utc).isoformat(timespec="seconds")
+        )
+        state.update(model=model, info={**info, "alias": CHAMPION}, figures={})
+        MODEL_LOADED.set(1)
+        MODEL_PROMOTIONS.inc()
+        logger.info("Model v%s approved and now served as %s", body.version, CHAMPION)
+        return state["info"]

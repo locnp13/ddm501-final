@@ -46,8 +46,8 @@ stages:
       size: 2604
     - path: src/training/train.py
       hash: md5
-      md5: af0aa25ba5a283feb0105bfc54ece463
-      size: 15110
+      md5: d6d8dc960acf096f50e319ac88de6911
+      size: 15115
     params:
       params.yaml:
         economics:
@@ -83,7 +83,7 @@ stages:
     outs:
     - path: reports/drift.html
       hash: md5
-      md5: 9f3e438866fac68f3a680fb9612f4f76
+      md5: b0705f026bf4cf7bd31e41becd02442f
       size: 3213176
     - path: reports/metrics.json
       hash: md5

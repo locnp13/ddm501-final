@@ -69,6 +69,7 @@ const money = (x) => `${x < 0 ? "-" : ""}$${Math.abs(Math.round(x)).toLocaleStri
 const labelOf = (field, value) => (field.options?.find(([v]) => v === String(value)) ?? [value, value])[1];
 
 let modelInfo = null; // GET /v1/model, null until loaded or when no model
+let challenger = null; // GET /v1/model/challenger, null when nothing awaits approval
 
 // ---------- tabs ----------
 function showTab(name) {
@@ -319,17 +320,70 @@ async function loadModel() {
   return modelInfo;
 }
 
+async function loadChallenger() {
+  try {
+    const res = await fetch(`${API}/v1/model/challenger`);
+    challenger = res.ok ? await res.json() : null;
+  } catch { challenger = null; }
+  $("#pending-dot").hidden = challenger === null;
+  return challenger;
+}
+
+// metric, label, formatter, whether a higher value is better
+const COMPARE = [
+  ["pr_auc", "PR-AUC (chỉ số chính)", (v) => v.toFixed(4), true],
+  ["roc_auc", "ROC-AUC", (v) => v.toFixed(4), true],
+  ["brier", "Brier (thấp hơn là tốt hơn)", (v) => v.toFixed(4), false],
+  ["recall", "Recall tại mức liên hệ tối ưu", (v) => pct(v, 1), true],
+  ["precision", "Precision tại mức đó", (v) => pct(v, 1), true],
+  ["best_profit", "Lợi nhuận thực tế tối đa", (v) => money(v), true],
+];
+
+function compareRows(cur, cand) {
+  return COMPARE.map(([key, label, fmt, higher]) => {
+    const a = cur?.metrics[key], b = cand.metrics[key];
+    let delta = "—", cls = "";
+    if (a != null && b != null && a !== 0) {
+      const diff = b - a;
+      cls = Math.abs(diff / a) < 0.001 ? "" : (diff > 0) === higher ? "good" : "bad";
+      delta = `${diff > 0 ? "+" : ""}${key === "best_profit" ? money(diff) : diff.toFixed(4)}`;
+    }
+    return `<tr><td>${label}</td><td class="num">${a != null ? fmt(a) : "—"}</td><td class="num">${fmt(b)}</td><td class="num delta ${cls}">${delta}</td></tr>`;
+  }).join("");
+}
+
+function pendingCard(cur, cand) {
+  const names = { xgb: "XGBoost", logreg: "Logistic Regression", rf: "Random Forest", dummy: "Dummy" };
+  const sameData = !cur || cur.provenance.data_md5 === cand.provenance.data_md5;
+  return `<div class="card pending">
+    <div class="spread"><h2 style="margin:0">Model chờ duyệt <span class="badge mid">${esc(cand.alias)} · v${esc(cand.version)}</span></h2>
+    <span class="muted">${new Date(cand.created_at).toLocaleString("vi-VN")}</span></div>
+    <p class="muted" style="margin:6px 0 14px">Model này đã qua quality gate nhưng <b>chưa phục vụ</b>. Chỉ khi bạn duyệt, API mới bắt đầu dùng nó.</p>
+    ${sameData ? "" : '<div class="error" style="margin:0 0 12px">Dữ liệu huấn luyện của hai model khác nhau, các chỉ số không so sánh trực tiếp được.</div>'}
+    <div class="table-wrap"><table>
+      <thead><tr><th>Chỉ số (tập kiểm tra)</th><th class="num">${cur ? `Đang chạy v${esc(cur.version)}` : "Đang chạy"}</th><th class="num">Chờ duyệt v${esc(cand.version)}</th><th class="num">Chênh lệch</th></tr></thead>
+      <tbody>${compareRows(cur, cand)}
+        <tr><td>Thuật toán</td><td class="num">${cur ? esc(names[cur.selected.model] ?? cur.selected.model) : "—"}</td><td class="num">${esc(names[cand.selected.model] ?? cand.selected.model)}</td><td></td></tr>
+        <tr><td>Git commit</td><td class="num mono">${cur ? esc(cur.provenance.git_commit.slice(0, 8)) : "—"}</td><td class="num mono">${esc(cand.provenance.git_commit.slice(0, 8))}</td><td></td></tr>
+      </tbody></table></div>
+    <div class="row" style="margin-top:16px"><button class="btn primary" id="approve-open" data-version="${esc(cand.version)}">Duyệt và đưa vào phục vụ</button>
+    <span class="muted" style="font-size:13px">Cần khóa quản trị.</span></div>
+  </div>`;
+}
+
 async function renderModel() {
   const box = $("#model-content");
   const info = modelInfo ?? await loadModel();
+  await loadChallenger();
+  const pending = challenger ? pendingCard(info, challenger) : "";
   if (!info) {
-    box.innerHTML = `<div class="card placeholder">Chưa có thông tin mô hình. Hãy huấn luyện (<span class="mono">dvc repro</span>), duyệt model (<span class="mono">python -m src.training.promote</span>) rồi khởi động lại API.</div>`;
+    box.innerHTML = `${pending}<div class="card placeholder">Chưa có thông tin mô hình. Hãy huấn luyện (<span class="mono">dvc repro</span>), duyệt model (<span class="mono">python -m src.training.promote</span>) rồi khởi động lại API.</div>`;
     return;
   }
   const m = info.metrics, sel = info.selected, p = info.provenance;
   const stat = (v, l) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`;
   const modelNames = { xgb: "XGBoost", logreg: "Logistic Regression", rf: "Random Forest", dummy: "Dummy" };
-  box.innerHTML = `
+  box.innerHTML = `${pending}
     <div class="card">
       <div class="spread"><h2 style="margin:0">${esc(info.name)} <span class="badge low">${esc(info.alias)} · v${esc(info.version)}</span></h2>
       <span class="muted">${new Date(info.created_at).toLocaleString("vi-VN")}</span></div>
@@ -389,6 +443,63 @@ async function renderModel() {
     </div>`;
 }
 
+// ---------- approval ----------
+const dialog = $("#approve-dialog");
+function toast(text) {
+  const t = $("#toast");
+  t.textContent = text;
+  t.hidden = false;
+  setTimeout(() => { t.hidden = true; }, 4000);
+}
+function approveError(res, body) {
+  if (res.status === 401) return "Khóa quản trị không đúng.";
+  if (res.status === 503) return "Server chưa cấu hình ADMIN_KEY nên chức năng duyệt đang tắt.";
+  if (res.status === 404) return "Không còn model nào chờ duyệt. Hãy tải lại trang.";
+  return typeof body.detail === "string" ? body.detail : `Lỗi ${res.status}`;
+}
+$("#model-content").addEventListener("click", (e) => {
+  const btn = e.target.closest("#approve-open");
+  if (!btn) return;
+  const from = modelInfo ? `v${modelInfo.version}` : "chưa có model";
+  $("#approve-summary").innerHTML = `Bạn sắp thay model đang phục vụ (<b>${esc(from)}</b>) bằng <b>v${esc(btn.dataset.version)}</b>. Từ lúc xác nhận, mọi dự đoán sẽ dùng model mới.`;
+  $("#approve-error").hidden = true;
+  $("#approve-key").value = "";
+  dialog.dataset.version = btn.dataset.version;
+  dialog.showModal();
+  $("#approve-key").focus();
+});
+$("#approve-cancel").addEventListener("click", () => dialog.close());
+$("#approve-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const confirm = $("#approve-confirm"), errBox = $("#approve-error");
+  confirm.disabled = true;
+  confirm.textContent = "Đang duyệt…";
+  errBox.hidden = true;
+  try {
+    const res = await fetch(`${API}/v1/model/promote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Key": $("#approve-key").value },
+      body: JSON.stringify({ version: dialog.dataset.version }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(approveError(res, body));
+    modelInfo = body;
+    challenger = null;
+    $("#pending-dot").hidden = true;
+    dialog.close();
+    await renderModel();
+    refreshStatus();
+    toast(`Đã duyệt: model v${body.version} đang phục vụ`);
+  } catch (err) {
+    errBox.textContent = err.message;
+    errBox.hidden = false;
+  } finally {
+    $("#approve-key").value = "";
+    confirm.disabled = false;
+    confirm.textContent = "Xác nhận duyệt";
+  }
+});
+
 // ---------- status + links ----------
 async function refreshStatus() {
   const dot = $("#status-dot"), text = $("#status-text");
@@ -397,6 +508,7 @@ async function refreshStatus() {
     const h = await res.json();
     dot.className = `dot ${h.model_loaded ? "ok" : "bad"}`;
     if (h.model_loaded && !modelInfo) await loadModel();
+    await loadChallenger();
     text.textContent = h.model_loaded ? `API sẵn sàng${modelInfo ? ` · model v${modelInfo.version}` : ""}` : "API chạy nhưng chưa có model";
   } catch {
     dot.className = "dot bad";

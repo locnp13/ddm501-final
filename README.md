@@ -58,6 +58,9 @@ MLflow dùng cổng 5001 vì cổng 5000 bị AirPlay Receiver chiếm trên mac
 Yêu cầu: Docker và Docker Compose. Không cần cài Python lên máy host.
 
 ```bash
+# 0. Tạo khóa quản trị dùng khi duyệt model trên giao diện (tệp .env không được commit)
+cp .env.example .env   # rồi đặt ADMIN_KEY, ví dụ: openssl rand -hex 24
+
 # 1. Khởi động hạ tầng
 docker compose up -d --build
 
@@ -65,9 +68,8 @@ docker compose up -d --build
 GIT_COMMIT=$(git rev-parse HEAD) GIT_DIRTY=$(git status --porcelain | wc -l) \
   docker compose run --rm trainer dvc repro
 
-# 3. Duyệt model (bước của con người) rồi nạp lại trong API (API chỉ nạp model lúc khởi động)
-docker compose run --rm trainer python -m src.training.promote
-docker compose restart api
+# 3. Duyệt model (bước của con người): mở http://localhost:8080, tab Mô hình, xem bảng so sánh rồi bấm Duyệt
+#    (cần ADMIN_KEY trong .env). API nạp model mới ngay, không cần restart.
 ```
 
 Sau đó:
@@ -99,7 +101,7 @@ Khi chưa có model mang alias `champion`, `/v1/predict` trả `503 Model not lo
 
 **Kiểm tra đầu vào** (schema Pydantic, ví dụ có sẵn trong Swagger): thiếu trường, sai kiểu hoặc số ngoài dải (`tenure` 0-120, `MonthlyCharges` >= 0, `SeniorCitizen` 0/1) trả `422` kèm trường lỗi; `TotalCharges` được phép `null` (khách mới). Giá trị phân loại chưa từng thấy khi huấn luyện (ví dụ `PaymentMethod: "Momo"`) vẫn được dự đoán, phản hồi có `warnings` và metric `churn_unknown_category_total` tăng. Phản hồi gồm `churn_probability`, `model_version`, `warnings`.
 
-API còn có `GET /v1/model` (phiên bản, chỉ số, cấu hình được chọn, nguồn gốc, đường cong lợi nhuận, so sánh cấu hình) và `GET /v1/model/figures/{calibration.png|profit_curve.png}`; giao diện web dùng các endpoint này.
+API còn có `GET /v1/model/challenger` và `POST /v1/model/promote` (duyệt model: cần header `X-Admin-Key`, chỉ duyệt đúng bản đang là `challenger`, nạp thử model trước khi đổi alias, và phục vụ ngay không cần restart; tắt nếu `ADMIN_KEY` rỗng), `GET /v1/model` (phiên bản, chỉ số, cấu hình được chọn, nguồn gốc, đường cong lợi nhuận, so sánh cấu hình) và `GET /v1/model/figures/{calibration.png|profit_curve.png}`; giao diện web dùng các endpoint này.
 
 ## Pipeline huấn luyện
 
@@ -108,7 +110,7 @@ Hai stage DVC (`dvc.yaml`), tham số trong `params.yaml`:
 1. **`ingest`** (`src/training/data.py`): tải CSV, kiểm định schema bằng Pandera, ép `TotalCharges` rỗng về NaN, ghi `data/processed/churn.csv`.
 2. **`train`** (`src/training/train.py`): chia train/test phân tầng theo `Churn`; so sánh Dummy, Logistic Regression, Random Forest, XGBoost với/không có feature mới và với/không có cột nhạy cảm bằng CV (mỗi cấu hình là một run MLflow); tune XGBoost bằng Optuna; hiệu chuẩn xác suất (isotonic); tính lợi nhuận và Recall@k theo mức liên hệ khách; ghi params/metrics/artifact và provenance (git commit, hash dữ liệu) lên MLflow; sinh báo cáo Evidently (train vs test, chỉ là sanity check); kiểm tra quality gate. Chọn mô hình chỉ dựa vào CV, tập test dùng một lần.
 
-**Quality gate** (3 điều kiện, tham số trong `params.yaml`): PR-AUC test >= sàn 0.50; không tệ hơn baseline Logistic Regression (bỏ qua nếu chính LogReg thắng); không tệ hơn champion hiện tại quá 0.005. Qua gate thì model được đăng ký với alias `challenger`; một thành viên duyệt bằng `python -m src.training.promote` để thành `champion`, là model API phục vụ. Nếu không qua, run vẫn được log, model không được đăng ký và tiến trình thoát với mã khác 0.
+**Quality gate** (3 điều kiện, tham số trong `params.yaml`): PR-AUC test >= sàn 0.50; không tệ hơn baseline Logistic Regression (bỏ qua nếu chính LogReg thắng); không tệ hơn champion hiện tại quá 0.005. Qua gate thì model được đăng ký với alias `challenger` và **chưa được phục vụ**; hệ thống không bao giờ tự duyệt. Một thành viên duyệt trên giao diện web (tab Mô hình, nút Duyệt, cần `ADMIN_KEY`) hoặc bằng `python -m src.training.promote`, khi đó model thành `champion` và API phục vụ nó. Nếu không qua, run vẫn được log, model không được đăng ký và tiến trình thoát với mã khác 0.
 
 ### Dữ liệu và remote DVC (MinIO)
 
@@ -173,7 +175,7 @@ Chưa hoàn thành (theo yêu cầu đề bài):
 
 | Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
 |-------------|------------------------|------------|
-| `/v1/predict` trả 503 | Chưa có model `champion` hoặc API chưa nạp lại | Chạy `dvc repro`, `python -m src.training.promote`, rồi `docker compose restart api` |
+| `/v1/predict` trả 503 | Chưa có model `champion` hoặc chưa duyệt model | Chạy `dvc repro`, rồi duyệt model ở tab Mô hình (hoặc `python -m src.training.promote` và `docker compose restart api`) |
 | `dvc repro` thoát mã khác 0 ở bước train | Không qua quality gate (xem tag `gate_failures` của run) | Xem metric ở MLflow, chỉnh `params.yaml` hoặc mô hình |
 | Lỗi tải dữ liệu | Không có mạng và chưa có `data/raw/telco.csv` | Kết nối mạng, hoặc đặt CSV vào `data/raw/` |
 | Không mở được MLflow ở cổng 5000 | macOS AirPlay Receiver chiếm cổng | Dùng http://localhost:5001 |

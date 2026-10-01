@@ -17,7 +17,7 @@
     <nav id="tabs" role="tablist" aria-label="Các mục">
       <button role="tab" data-tab="predict" aria-selected="true">Dự đoán</button>
       <button role="tab" data-tab="history" aria-selected="false">Lịch sử <span id="history-count" class="muted"></span></button>
-      <button role="tab" data-tab="model" aria-selected="false">Mô hình</button>
+      <button role="tab" data-tab="model" aria-selected="false">Mô hình <span id="pending-dot" class="pending-dot" hidden title="Có model đang chờ duyệt" aria-label="Có model đang chờ duyệt"></span></button>
       <button role="tab" data-tab="docs" aria-selected="false">Tài liệu</button>
     </nav>
     <div class="status" role="status"><span id="status-dot" class="dot"></span><span id="status-text">Đang kiểm tra API…</span></div>
@@ -110,6 +110,11 @@
           </ul>
         </section>
         <section>
+          <h2>Model mới được đưa vào phục vụ thế nào</h2>
+          <p>Huấn luyện xong, model mới chỉ được <b>đề cử</b> (nhãn <span class="mono">challenger</span>) và <b>chưa phục vụ</b>. Tab <b>Mô hình</b> hiện chấm đỏ khi có model chờ duyệt. Người phụ trách xem bảng so sánh với model đang chạy, rồi bấm <b>Duyệt</b> và nhập khóa quản trị. Chỉ khi đó model mới được nạp và bắt đầu trả lời dự đoán, không cần khởi động lại hệ thống.</p>
+          <p>Mỗi lần duyệt được ghi lại trên MLflow (thời điểm duyệt) và đếm trong số liệu giám sát. Muốn quay lại bản cũ, đặt lại nhãn <span class="mono">champion</span> trên MLflow rồi khởi động lại API.</p>
+        </section>
+        <section>
           <h2>Hạn chế cần biết</h2>
           <div class="note">
             <ul style="margin:0">
@@ -127,6 +132,22 @@
       </article>
     </section>
   </main>
+  <dialog id="approve-dialog" aria-labelledby="approve-title">
+    <form method="dialog" id="approve-form">
+      <h2 id="approve-title">Duyệt model đưa vào phục vụ</h2>
+      <p id="approve-summary"></p>
+      <label>Khóa quản trị
+        <input id="approve-key" type="password" autocomplete="off" required>
+      </label>
+      <p class="muted" style="font-size:13px">Khóa nằm trong tệp <span class="mono">.env</span> trên máy chạy hệ thống (biến <span class="mono">ADMIN_KEY</span>). Khóa không được lưu lại.</p>
+      <div id="approve-error" class="error" hidden></div>
+      <div class="row" style="justify-content:flex-end;margin-top:14px">
+        <button type="button" class="btn" id="approve-cancel">Hủy</button>
+        <button type="submit" class="btn primary" id="approve-confirm">Xác nhận duyệt</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
   <footer>Đồ án DDM501 · AI in Production</footer>
   <script src="app.js"></script>
 </body>

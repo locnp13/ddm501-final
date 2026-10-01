@@ -12,8 +12,8 @@ Everything runs in Docker; no Python install on the host is needed.
 
 - Start stack: `docker compose up -d --build` (MLflow on host port 5001, MinIO 9000/9001, API 8000, web UI 8080, Prometheus 9090, Grafana 3000)
 - Train (DVC: `ingest` then `train`; compares 4 models x feature sets x sensitive-column setting by CV, tunes XGBoost, calibrates, and if the 3-part gate passes registers the model with alias `challenger`): `GIT_COMMIT=$(git rev-parse HEAD) GIT_DIRTY=$(git status --porcelain | wc -l) docker compose run --rm trainer dvc repro` (the env vars tag the MLflow run for reproducibility)
-- Approve a model (human step): `docker compose run --rm trainer python -m src.training.promote [VERSION]` sets alias `champion`; the API serves `models:/churn-model@champion`
-- Reload model in API (loaded only at startup): `docker compose restart api`
+- Approve a model (human step, never automatic): in the web UI's Mô hình tab press Duyệt and enter `ADMIN_KEY` from `.env` (API `POST /v1/model/promote`, loads the model and serves it at once), or `docker compose run --rm trainer python -m src.training.promote [VERSION]` followed by `docker compose restart api`. The API serves `models:/churn-model@champion`; training only ever sets `challenger`
+- The API loads the champion at startup and when a model is approved through the UI; a champion changed by other means (MLflow UI, `promote` script) needs `docker compose restart api`
 - Tests: `docker compose run --rm trainer pytest -q`; lint: `ruff check src tests` (config in `ruff.toml`)
 - Data remote is the `dvc` bucket on MinIO: `docker compose run --rm trainer dvc push|pull`
 

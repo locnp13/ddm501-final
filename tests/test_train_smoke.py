@@ -28,14 +28,14 @@ def test_training_registers_challenger_and_promotes(telco_clean, mlflow_sqlite) 
     assert outcome["passed"], outcome["reasons"]
     assert 0.0 <= outcome["brier"] <= 1.0
     assert outcome["pr_auc"] > 0
-    assert mlflow_sqlite.get_model_version_by_alias(MODEL_NAME, CHALLENGER).version == outcome["version"]
+    assert str(mlflow_sqlite.get_model_version_by_alias(MODEL_NAME, CHALLENGER).version) == outcome["version"]
 
     model = mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}/{outcome['version']}")
     proba = model.predict(telco_clean.drop(columns=["Churn"]).head(5))
     assert ((proba >= 0) & (proba <= 1)).all()
 
     promote(mlflow_sqlite)
-    assert mlflow_sqlite.get_model_version_by_alias(MODEL_NAME, CHAMPION).version == outcome["version"]
+    assert str(mlflow_sqlite.get_model_version_by_alias(MODEL_NAME, CHAMPION).version) == outcome["version"]
 
 
 def test_gate_failure_registers_nothing(telco_clean, mlflow_sqlite) -> None:
