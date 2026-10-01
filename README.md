@@ -97,6 +97,8 @@ curl -X POST http://localhost:8000/v1/predict \
 
 Khi chưa có model mang alias `champion`, `/v1/predict` trả `503 Model not loaded`. Đây là hành vi có chủ đích.
 
+**Kiểm tra đầu vào** (schema Pydantic, ví dụ có sẵn trong Swagger): thiếu trường, sai kiểu hoặc số ngoài dải (`tenure` 0-120, `MonthlyCharges` >= 0, `SeniorCitizen` 0/1) trả `422` kèm trường lỗi; `TotalCharges` được phép `null` (khách mới). Giá trị phân loại chưa từng thấy khi huấn luyện (ví dụ `PaymentMethod: "Momo"`) vẫn được dự đoán, phản hồi có `warnings` và metric `churn_unknown_category_total` tăng. Phản hồi gồm `churn_probability`, `model_version`, `warnings`.
+
 API còn có `GET /v1/model` (phiên bản, chỉ số, cấu hình được chọn, nguồn gốc, đường cong lợi nhuận, so sánh cấu hình) và `GET /v1/model/figures/{calibration.png|profit_curve.png}`; giao diện web dùng các endpoint này.
 
 ## Pipeline huấn luyện
@@ -161,7 +163,7 @@ Chưa hoàn thành (theo yêu cầu đề bài):
 
 - [ ] Dashboard Grafana
 - [ ] Test API (integration) và coverage > 80%
-- [ ] Endpoint batch, request/response schema chặt và OpenAPI examples
+- [ ] Endpoint `/v1/predict/batch` (schema chặt và ví dụ OpenAPI đã có cho `/v1/predict`)
 - [ ] Giải thích mô hình (SHAP, LIME)
 - [ ] Phân tích fairness và giảm thiểu thiên lệch
 - [ ] Tài liệu privacy, ethics, hướng dẫn vận hành, so sánh lựa chọn công nghệ

@@ -6,10 +6,13 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from src.serving.model_info import FIGURES, load_figure, load_model_info
+from src.serving.schemas import CustomerFeatures, PredictResponse, unknown_categories
 
 logger = logging.getLogger("churn-api")
 
@@ -22,6 +25,9 @@ CHURN_PROBABILITY = Histogram(
     "churn_probability", "Predicted churn probability", buckets=[i / 10 for i in range(11)]
 )
 MODEL_LOADED = Gauge("churn_model_loaded", "1 if a model is loaded, else 0")
+UNKNOWN_CATEGORY = Counter(
+    "churn_unknown_category_total", "Requests with a category never seen in training", ["field"]
+)
 
 state: dict[str, Any] = {"model": None, "info": None, "figures": {}}
 
@@ -59,19 +65,38 @@ def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@app.post("/v1/predict")
-def predict(features: dict[str, Any]) -> dict[str, Any]:
-    """Return churn probability for one customer's feature dict."""
+@app.exception_handler(RequestValidationError)
+async def count_validation_errors(request: Request, exc: RequestValidationError):
+    """Count rejected requests (422) so monitoring sees bad input, then answer as FastAPI would."""
+    REQUESTS.labels(request.url.path.removeprefix("/v1/"), "422").inc()
+    return await request_validation_exception_handler(request, exc)
+
+
+@app.post("/v1/predict", response_model=PredictResponse)
+def predict(features: CustomerFeatures) -> PredictResponse:
+    """Return the calibrated churn probability for one customer.
+
+    Missing fields, wrong types and out-of-range numbers are rejected with 422. A category never
+    seen in training is still scored, with a warning in the response.
+    """
     start = time.perf_counter()
     try:
         if state["model"] is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
-        result = state["model"].predict(pd.DataFrame([features]))
-        prob = float(result[0])
+        frame = pd.DataFrame([features.model_dump()]).astype({"TotalCharges": "float64"})
+        prob = float(state["model"].predict(frame)[0])
+        unknown = unknown_categories(features)
+        for field, _ in unknown:
+            UNKNOWN_CATEGORY.labels(field).inc()
         PREDICTIONS.labels("churn" if prob >= 0.5 else "stay").inc()
         CHURN_PROBABILITY.observe(prob)
         REQUESTS.labels("predict", "200").inc()
-        return {"churn_probability": prob}
+        version = state["info"]["version"] if state["info"] else None
+        return PredictResponse(
+            churn_probability=prob,
+            model_version=version,
+            warnings=[f"{field}: unseen category {value!r}" for field, value in unknown],
+        )
     except HTTPException as exc:
         REQUESTS.labels("predict", str(exc.status_code)).inc()
         raise

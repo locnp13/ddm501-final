@@ -48,7 +48,7 @@ def test_health_reports_loaded_model(client) -> None:
 
 def test_predict_returns_probability(client) -> None:
     res = client.post("/v1/predict", json=features())
-    assert res.status_code == 200
+    assert res.status_code == 200, res.text
     assert 0.0 <= res.json()["churn_probability"] <= 1.0
 
 
@@ -77,6 +77,87 @@ def test_model_figures(client) -> None:
 def test_metrics_endpoint_counts_predictions(client) -> None:
     client.post("/v1/predict", json=features())
     assert "churn_requests_total" in client.get("/metrics").text
+
+
+@pytest.mark.parametrize(
+    ("change", "field"),
+    [
+        ({"Contract": None}, "Contract"),  # null where a value is required
+        ({"tenure": -1}, "tenure"),
+        ({"tenure": 5.5}, "tenure"),  # not a whole number of months
+        ({"tenure": "five"}, "tenure"),
+        ({"MonthlyCharges": -0.01}, "MonthlyCharges"),
+        ({"TotalCharges": -5}, "TotalCharges"),
+        ({"SeniorCitizen": 2}, "SeniorCitizen"),
+        ({"gender": ""}, "gender"),
+    ],
+)
+def test_invalid_values_are_rejected_with_422(client, change, field) -> None:
+    res = client.post("/v1/predict", json={**features(), **change})
+    assert res.status_code == 422
+    assert field in {err["loc"][-1] for err in res.json()["detail"]}
+
+
+def test_missing_field_is_rejected(client) -> None:
+    body = features()
+    del body["PaymentMethod"]
+    res = client.post("/v1/predict", json=body)
+    assert res.status_code == 422
+    assert res.json()["detail"][0]["loc"][-1] == "PaymentMethod"
+
+
+def test_non_json_body_is_rejected(client) -> None:
+    res = client.post("/v1/predict", content=b"not json", headers={"Content-Type": "application/json"})
+    assert res.status_code == 422
+
+
+def test_rejected_requests_never_reach_the_model(client) -> None:
+    before = client.get("/metrics").text.count("churn_predictions_total{")
+    client.post("/v1/predict", json={**features(), "tenure": -1})
+    assert client.get("/metrics").text.count("churn_predictions_total{") == before
+
+
+def test_422_is_counted_in_metrics(client) -> None:
+    client.post("/v1/predict", json={**features(), "tenure": -1})
+    assert 'churn_requests_total{endpoint="predict",status="422"}' in client.get("/metrics").text
+
+
+def test_unseen_category_is_scored_with_warning(client) -> None:
+    res = client.post("/v1/predict", json=features(PaymentMethod="Momo"))
+    assert res.status_code == 200
+    assert res.json()["warnings"] == ["PaymentMethod: unseen category 'Momo'"]
+    assert 'churn_unknown_category_total{field="PaymentMethod"}' in client.get("/metrics").text
+
+
+def test_known_categories_give_no_warnings_and_report_version(client) -> None:
+    body = client.post("/v1/predict", json=features()).json()
+    assert body["warnings"] == [] and body["model_version"] == "1"
+
+
+def test_extra_fields_are_ignored(client) -> None:
+    assert client.post("/v1/predict", json={**features(), "customerID": "0001-A"}).status_code == 200
+
+
+def test_openapi_documents_example_and_constraints(client) -> None:
+    schema = client.get("/openapi.json").json()["components"]["schemas"]["CustomerFeatures"]
+    assert schema["examples"][0]["Contract"] == "Month-to-month"
+    assert schema["properties"]["tenure"]["minimum"] == 0
+    assert set(schema["required"]) == set(schema["properties"]) - {"TotalCharges"}
+
+
+def test_api_schema_matches_training_schema() -> None:
+    """The API must accept exactly the columns the model was trained on, with the same categories."""
+    from src.serving.schemas import KNOWN_CATEGORIES, CustomerFeatures
+    from src.training.data import SCHEMA
+
+    assert set(CustomerFeatures.model_fields) == set(SCHEMA.columns) - {"customerID", "Churn"}
+    categorical = {
+        name for name, col in SCHEMA.columns.items()
+        if col.checks and "allowed_values" in col.checks[0].statistics
+    } - {"Churn", "SeniorCitizen"}
+    assert categorical == set(KNOWN_CATEGORIES)
+    for name, known in KNOWN_CATEGORIES.items():
+        assert set(SCHEMA.columns[name].checks[0].statistics["allowed_values"]) == set(known), name
 
 
 def test_no_model_gives_503(tmp_path, monkeypatch) -> None:

@@ -187,8 +187,21 @@ function renderResult(entry) {
       (cước ${money(inputs.MonthlyCharges)}/tháng, giá trị ${e.months} tháng; ưu đãi ${pct(e.cost, 0)}, giữ được ${pct(e.success, 0)}).</p>
       <p class="muted" style="margin:6px 0 0;font-size:13px">Dựa trên giả định chi phí, không phải số liệu thật.</p>
     </div>
+    ${(entry.warnings ?? []).length ? `<div class="advice" style="background:var(--mid-bg)"><b>Lưu ý về dữ liệu nhập</b>${entry.warnings.map((w) => `<p style="margin:4px 0 0">${esc(w)}</p>`).join("")}<p class="muted" style="margin:6px 0 0;font-size:13px">Giá trị chưa từng xuất hiện khi huấn luyện, kết quả có thể kém tin cậy.</p></div>` : ""}
     <p class="muted" style="margin:12px 0 0;font-size:12px">${modelInfo
       ? `Model ${esc(modelInfo.name)} v${esc(modelInfo.version)} (${esc(modelInfo.alias)})` : "Model đang chạy"}</p>`;
+}
+
+// FastAPI returns 422 with one {loc, msg} per invalid field; show them by field label.
+function apiErrorMessage(status, body) {
+  if (status === 503) return "Chưa có model được duyệt (champion). Hãy huấn luyện và duyệt một model trước.";
+  if (status === 422 && Array.isArray(body.detail)) {
+    return body.detail.map((d) => {
+      const name = d.loc[d.loc.length - 1];
+      return `${FIELDS.find((f) => f.name === name)?.label ?? name}: ${d.msg}`;
+    }).join(" · ");
+  }
+  return typeof body.detail === "string" ? body.detail : `Lỗi ${status}`;
 }
 
 async function onSubmit(ev) {
@@ -209,8 +222,8 @@ async function onSubmit(ev) {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(inputs),
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(res.status === 503 ? "Chưa có model được duyệt (champion). Hãy huấn luyện và duyệt một model trước." : (body.detail ? JSON.stringify(body.detail) : `Lỗi ${res.status}`));
-    const entry = { time: Date.now(), probability: body.churn_probability, inputs };
+    if (!res.ok) throw new Error(apiErrorMessage(res.status, body));
+    const entry = { time: Date.now(), probability: body.churn_probability, inputs, warnings: body.warnings ?? [] };
     saveHistory(entry);
     renderResult(entry);
   } catch (err) {

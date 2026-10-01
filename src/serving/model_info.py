@@ -57,7 +57,7 @@ def load_model_info(uri: str) -> dict[str, Any] | None:
     return {
         "name": name,
         "alias": alias,
-        "version": version.version,
+        "version": str(version.version),
         "run_id": run.info.run_id,
         "created_at": version.creation_timestamp,
         "metrics": {k: run.data.metrics[k] for k in METRIC_KEYS if k in run.data.metrics},
