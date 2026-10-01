@@ -33,7 +33,8 @@ DVC (ingest + validate) -> train (Optuna + CV) -> MLflow Tracking/Registry
                                                         |
 Client -> FastAPI /v1/predict  <-- nạp model ------------+
              |
-             +-> /metrics -> Prometheus -> Grafana (alert rules)
+             +-> /metrics -> Prometheus (trong cụm) -> Alertmanager -> alert-hub -> tab Cảnh báo
+                                          +-> Grafana (3 dashboard)
 ```
 
 Kiến trúc triển khai hiện tại (Compose + Kubernetes + runner) và hướng dẫn vận hành: [`docs/deployment-guide.md`](docs/deployment-guide.md). Sơ đồ luồng MLOps: [`docs/mlops-flow.html`](docs/mlops-flow.html). Đặc tả pipeline huấn luyện: [`docs/spec-churn-training-pipeline.md`](docs/spec-churn-training-pipeline.md).
@@ -46,12 +47,10 @@ Kiến trúc triển khai hiện tại (Compose + Kubernetes + runner) và hư�
 | `minio` | Object storage S3: bucket `mlflow` (artifact/model) và `dvc` (remote dữ liệu) | 9000 (S3), 9001 (console) |
 | `mlflow` | Tracking server + Model Registry | 5001 |
 | `trainer` | Chạy pipeline huấn luyện (profile `train`) | - |
-| `prometheus` | Thu thập metric, đánh giá alert rules | 9090 |
-| `grafana` | Dashboard | 3000 |
 
 MLflow dùng cổng 5001 vì cổng 5000 bị AirPlay Receiver chiếm trên macOS.
 
-`api` và `frontend` **không còn nằm trong Compose**: chúng chạy trên Kubernetes (minikube), xem phần Kubernetes bên dưới và [`k8s/README.md`](k8s/README.md).
+`api`, `frontend` và toàn bộ giám sát (Prometheus, Alertmanager, Grafana, alert-hub) **không nằm trong Compose**: chúng chạy trên Kubernetes (minikube), xem phần Kubernetes bên dưới và [`k8s/README.md`](k8s/README.md).
 
 ## Bắt đầu nhanh
 
@@ -59,9 +58,9 @@ Yêu cầu: Docker, Docker Compose, minikube và kubectl. Không cần cài Pyth
 
 ```bash
 # 0. Tạo khóa quản trị dùng khi duyệt model trên giao diện (tệp .env không được commit)
-cp .env.example .env   # rồi đặt ADMIN_KEY, ví dụ: openssl rand -hex 24
+cp .env.example .env   # rồi đặt ADMIN_KEY và GRAFANA_ADMIN_PASSWORD, ví dụ: openssl rand -hex 24
 
-# 1. Khởi động hạ tầng (MLflow, MinIO, Postgres, Prometheus, Grafana)
+# 1. Khởi động hạ tầng (MLflow, MinIO, Postgres)
 docker compose up -d --build
 
 # 1b. Dựng cụm Kubernetes và triển khai api + frontend (lần đầu, xem k8s/README.md), rồi mở cổng ra máy:
@@ -80,8 +79,8 @@ Sau đó:
 - MLflow UI: http://localhost:5001
 - Swagger UI: http://localhost:8088/api/docs
 - MinIO console: http://localhost:9001 (mặc định `minioadmin` / `minioadmin`, đổi bằng biến `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`)
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000 (tài khoản mặc định `admin` / `admin`, chỉ dùng cho môi trường phát triển)
+- Grafana: http://localhost:8088/grafana/ (tài khoản `admin`, mật khẩu là `GRAFANA_ADMIN_PASSWORD` trong `.env`)
+- Prometheus: http://localhost:8088/prometheus/ · Alertmanager: http://localhost:8088/alertmanager/
 
 ### Ví dụ gọi API
 
@@ -127,19 +126,38 @@ Image MinIO chính thức không còn được phát hành công khai, nên comp
 
 ## Kubernetes (local)
 
-`api` và `frontend` chạy được trên minikube, kèm canary theo trọng số; hướng dẫn và các lưu ý ở [`k8s/README.md`](k8s/README.md). Deploy bằng nút **Run workflow** trên GitHub (tab Actions, workflow *Deploy to local Kubernetes*): kiểm tra runner trên máy đang chạy, rồi build image arm64 và triển khai lên cụm; xem phần Deploy trong `k8s/README.md`.
+`api`, `frontend` và bộ giám sát chạy trên minikube, kèm canary theo trọng số; hướng dẫn và các lưu ý ở [`k8s/README.md`](k8s/README.md). Deploy bằng nút **Run workflow** trên GitHub (tab Actions, workflow *Deploy to local Kubernetes*): kiểm tra runner trên máy đang chạy, rồi build image arm64 và triển khai lên cụm; xem phần Deploy trong `k8s/README.md`.
 
 ## Giám sát
 
-- Metric của API: `churn_requests_total`, `churn_request_latency_seconds`, `churn_predictions_total`, `churn_probability`, `churn_model_loaded`.
-- Alert rules (`monitoring/alerts.yml`):
+Chạy trong cụm Kubernetes, cấu hình trong [`k8s/monitoring/`](k8s/monitoring/):
 
-| Alert | Điều kiện | Mức |
-|-------|-----------|-----|
-| `ApiDown` | API không phản hồi 1 phút | critical |
-| `ModelNotLoaded` | API chạy nhưng chưa có model, 2 phút | warning |
-| `HighErrorRate` | Tỷ lệ 5xx > 5% trong 5 phút | critical |
-| `HighP95Latency` | p95 latency > 500 ms trong 5 phút | warning |
+| Thành phần | Vai trò | Truy cập |
+|---|---|---|
+| Prometheus | Quét **từng pod API** (đọc annotation `prometheus.io/*`), đánh giá luật cảnh báo, giữ dữ liệu 7 ngày | `/prometheus/` |
+| Alertmanager | Gom nhóm cảnh báo và gửi bằng webhook | `/alertmanager/` |
+| alert-hub | Nhận webhook, giữ danh sách cảnh báo, phục vụ tab **Cảnh báo** của giao diện (có chấm đỏ) | tab Cảnh báo |
+| Grafana | 3 dashboard: **Churn: API**, **Churn: Mô hình**, **Churn: So sánh phiên bản** | `/grafana/` |
+
+Số liệu của API: `churn_requests_total`, `churn_request_latency_seconds` (cả hai có nhãn `model_version`), `churn_predictions_total`, `churn_probability`, `churn_model_info`, `churn_model_loaded`, `churn_model_changes_total`, `churn_unknown_category_total`, cùng số liệu tiến trình (`process_cpu_seconds_total`, `process_resident_memory_bytes`).
+
+Luật cảnh báo (`k8s/monitoring/prometheus/alerts.yml`, được kiểm thử bằng `promtool test rules` trong CI). Ngưỡng là điểm khởi đầu của dự án, chưa đo từ dữ liệu thật:
+
+| Cảnh báo | Điều kiện | Mức |
+|---|---|---|
+| `ApiNoTargets` | Prometheus không thấy pod API nào, 2 phút | critical |
+| `ApiDown` | Một pod API không phản hồi, 1 phút | critical |
+| `HighErrorRate` | Lỗi 5xx > 5% trong 5 phút | critical |
+| `ReplicaLost` | Dưới 2 pod stable đang chạy, 3 phút | warning |
+| `ModelNotLoaded` | Pod chạy nhưng chưa có model, 2 phút | warning |
+| `HighValidationErrorRate` | Yêu cầu bị từ chối (422) > 20% trong 10 phút | warning |
+| `HighP95Latency` | p95 độ trễ > 500 ms trong 5 phút | warning |
+| `HighMemory` | RAM pod > 600 MiB (giới hạn 768 MiB), 5 phút | warning |
+| `UnknownCategorySpike` | Giá trị phân loại chưa từng thấy > 5% số dự đoán trong 15 phút | warning |
+| `PredictionDrift` | Xác suất trung bình 1 giờ lệch quá 0,10 so với 0,27 (tỷ lệ churn huấn luyện), kéo dài 30 phút, từ 50 dự đoán trở lên | warning |
+| `ModelChanged` | Model vừa được duyệt, khôi phục hoặc đồng bộ (10 phút) | info |
+
+Giám sát không đo được độ chính xác thật của model vì nhãn churn đến muộn; `PredictionDrift` và `UnknownCategorySpike` chỉ báo hiệu dữ liệu hoặc dự đoán đã đổi.
 
 ## Kiểm thử và CI
 
@@ -156,8 +174,9 @@ src/training/     ingest, validate, train, wrapper model
 src/serving/      FastAPI app, thông tin model cho giao diện
 frontend/         giao diện web (nginx + HTML/CSS/JS thuần)
 k8s/              manifest minikube: api, frontend, Ingress, canary
+k8s/monitoring/   Prometheus, Alertmanager, Grafana (dashboard), alert-hub, luật cảnh báo và test luật
 deploy/           Dockerfile cho api, mlflow, trainer
-monitoring/       Prometheus, alert rules, Grafana provisioning
+src/alerts/       alert-hub: nhận webhook của Alertmanager, phục vụ tab Cảnh báo
 tests/            test dữ liệu và quality gate
 docs/             hướng dẫn triển khai và vận hành, sơ đồ luồng MLOps, spec, quyết định thiết kế
 ```
@@ -166,12 +185,12 @@ docs/             hướng dẫn triển khai và vận hành, sơ đồ luồng
 
 Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-model` v3 là champion, API chạy trên Kubernetes). Các câu hỏi cần nhóm chốt: [`docs/open-questions.md`](docs/open-questions.md).
 
-Đã có: pipeline huấn luyện, API cơ bản, stack Compose có healthcheck, metric và alert rules, CI lint/test/build.
+Đã có: pipeline huấn luyện, API có kiểm tra đầu vào và duyệt/khôi phục model, giao diện web, giám sát (Prometheus, Alertmanager, 3 dashboard Grafana, 11 luật cảnh báo có test) trên Kubernetes, CI lint/test/build/kiểm tra cấu hình giám sát, test API (coverage khoảng 90%).
 
 Chưa hoàn thành (theo yêu cầu đề bài):
 
-- [ ] Dashboard Grafana
-- [ ] Test API (integration) và coverage > 80%
+- [ ] Kênh gửi cảnh báo ra ngoài (Slack, email): hiện cảnh báo chỉ vào tab Cảnh báo của giao diện
+- [ ] Drift theo từng feature (PSI) và nhật ký dự đoán
 - [ ] Endpoint `/v1/predict/batch` (schema chặt và ví dụ OpenAPI đã có cho `/v1/predict`)
 - [ ] Giải thích mô hình (SHAP, LIME)
 - [ ] Phân tích fairness và giảm thiểu thiên lệch

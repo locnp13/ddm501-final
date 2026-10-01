@@ -17,8 +17,9 @@ docker build -t churn-frontend:dev -f frontend/Dockerfile frontend
 
 # Khóa quản trị lấy từ .env (không có trong manifest), rồi triển khai
 kubectl apply -f k8s/base/namespace.yaml
-kubectl -n churn create secret generic churn-secrets --from-env-file=.env
+kubectl -n churn create secret generic churn-secrets --from-env-file=.env   # cần ADMIN_KEY và GRAFANA_ADMIN_PASSWORD
 kubectl apply -k k8s/base
+kubectl apply -k k8s/monitoring    # Prometheus, Alertmanager, Grafana, alert-hub
 kubectl -n churn rollout status deploy/api
 
 # Mở giao diện: http://localhost:8088
@@ -63,6 +64,7 @@ cd ~/actions-runner-ddm501
 | `Deployment/api` (2 bản sao) | Phục vụ model `@champion`, `MODEL_POLL_SECONDS=30` để các bản sao đồng bộ sau khi duyệt hoặc khôi phục |
 | `Deployment/frontend` | Giao diện web (nginx) |
 | `Ingress` | Trình duyệt chỉ nói chuyện với Ingress: `/api/*` đi vào API (bỏ tiền tố `/api`), còn lại vào giao diện. Ingress không ràng buộc host nên mở được bằng `localhost` |
+| `k8s/monitoring/` | Prometheus (có PVC 2 GiB, giữ 7 ngày), Alertmanager, Grafana, alert-hub, Role chỉ đọc pod trong namespace `churn` cho Prometheus. Truy cập qua `/prometheus/`, `/alertmanager/`, `/grafana/`; webhook của hub **không** mở ra ngoài, Ingress chỉ cho `GET /hub/alerts` |
 | `Service/api-admin` | Cùng các pod stable, dùng riêng cho `/api/v1/model/promote` và `/rollback` (xem bên dưới) |
 
 ## Canary
@@ -79,5 +81,7 @@ kubectl delete -k k8s/canary                 # gỡ canary
 
 - **ingress-nginx chia canary theo Service, không theo đường dẫn.** Mọi Ingress trỏ tới Service `api` đều bị chia, kể cả đường dẫn quản trị. Canary là bản ghim nên từ chối duyệt/khôi phục, nên lúc đầu khoảng 20% lệnh duyệt bị từ chối. Vì vậy lệnh quản trị đi qua Service `api-admin` riêng; sau khi sửa, 120/120 yêu cầu quản trị vào đúng nhóm stable.
 - **Image là bản build local** (`churn-api:<commit>`, `imagePullPolicy: IfNotPresent`), không phải image trên GHCR. Luồng tự deploy xem phần trên.
-- **Prometheus của Compose không scrape được pod trong cụm** (và target `api:8000` không còn tồn tại), nên số liệu API không lên Grafana và cảnh báo `ApiDown` sẽ kích hoạt. Pod có annotation `prometheus.io/*` nhưng chưa có gì đọc chúng.
+- **Prometheus trong cụm quét từng pod** (kể cả pod canary, nhãn `track=canary`) nhờ annotation `prometheus.io/*`; dashboard "So sánh phiên bản" tách số liệu theo `model_version`.
+- ConfigMap của giám sát được sinh bằng kustomize và phải khai báo `namespace: churn`, nếu không chúng rơi vào namespace `default` và pod không tìm thấy (đã gặp khi triển khai).
+- Dữ liệu Prometheus nằm trong PVC của minikube: mất nếu xóa cụm. Trạng thái Alertmanager (silence) và thay đổi trong giao diện Grafana nằm trong `emptyDir`, mất khi pod khởi động lại; dashboard thì lấy từ repo nên luôn được dựng lại.
 - `kubectl config` chuyển sang context `churn`. Context `minikube` cũ trong kubeconfig trỏ tới cụm không còn tồn tại và không bị đụng tới.

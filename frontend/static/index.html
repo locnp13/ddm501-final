@@ -18,6 +18,7 @@
       <button role="tab" data-tab="predict" aria-selected="true">Dự đoán</button>
       <button role="tab" data-tab="history" aria-selected="false">Lịch sử <span id="history-count" class="muted"></span></button>
       <button role="tab" data-tab="model" aria-selected="false">Mô hình <span id="pending-dot" class="pending-dot" hidden title="Có model đang chờ duyệt" aria-label="Có model đang chờ duyệt"></span></button>
+      <button role="tab" data-tab="alerts" aria-selected="false">Cảnh báo <span id="alerts-badge" class="alert-badge" hidden></span></button>
       <button role="tab" data-tab="docs" aria-selected="false">Tài liệu</button>
     </nav>
     <div class="status" role="status"><span id="status-dot" class="dot"></span><span id="status-text">Đang kiểm tra API…</span></div>
@@ -75,6 +76,10 @@
       <div id="model-content" class="stack"><div class="card placeholder">Đang tải thông tin mô hình…</div></div>
     </section>
 
+    <section id="tab-alerts" class="tab" role="tabpanel" hidden>
+      <div id="alerts-content" class="stack"><div class="card placeholder">Đang tải cảnh báo…</div></div>
+    </section>
+
     <section id="tab-docs" class="tab" role="tabpanel" hidden>
       <article class="card doc">
         <section>
@@ -108,6 +113,16 @@
             <li><b>Chỉ số chính</b>: PR-AUC, vì chỉ khoảng một phần tư khách rời đi nên accuracy dễ gây hiểu nhầm.</li>
             <li>Chi tiết từng phiên bản, chỉ số và biểu đồ nằm ở tab <b>Mô hình</b>.</li>
           </ul>
+        </section>
+        <section>
+          <h2>Giám sát và cảnh báo</h2>
+          <p>Prometheus thu số liệu từ từng pod API, Grafana vẽ dashboard (<b>Churn: API</b>, <b>Churn: Mô hình</b>, <b>Churn: So sánh phiên bản</b>), và Alertmanager gửi cảnh báo về tab <b>Cảnh báo</b>. Chấm đỏ trên tab báo có cảnh báo đang bắn.</p>
+          <ul>
+            <li><b>Nghiêm trọng</b> (critical): API không phản hồi, lỗi máy chủ trên 5%.</li>
+            <li><b>Cảnh báo</b> (warning): độ trễ cao, bộ nhớ gần giới hạn, dữ liệu vào bị từ chối nhiều, xuất hiện giá trị chưa từng thấy, <b>xác suất dự đoán trung bình lệch khỏi tỷ lệ huấn luyện</b> (dấu hiệu drift).</li>
+            <li><b>Thông tin</b> (info): model vừa được đổi.</li>
+          </ul>
+          <p>Cảnh báo không đo được độ chính xác thật của model: churn chỉ biết sau nhiều tuần, nên hệ thống chỉ báo hiệu khi dữ liệu hoặc dự đoán thay đổi bất thường.</p>
         </section>
         <section>
           <h2>Model mới được đưa vào phục vụ thế nào</h2>

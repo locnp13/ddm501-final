@@ -1,0 +1,19 @@
+route:
+  receiver: alert-hub
+  group_by: [alertname]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+
+receivers:
+  # The alert hub keeps the alerts for the web UI. To also notify a chat or email, add a receiver here
+  # (slack_configs, telegram, email_configs, ...) and list it under the route.
+  - name: alert-hub
+    webhook_configs:
+      - url: http://alert-hub:8080/webhook
+        send_resolved: true
+
+inhibit_rules:
+  # With no API pod at all the per-pod alerts add nothing.
+  - source_matchers: ['alertname="ApiNoTargets"']
+    target_matchers: ['alertname=~"ApiDown|ReplicaLost|ModelNotLoaded|HighMemory"']

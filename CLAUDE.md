@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Git repo (origin `github.com/locnp13/ddm501-final`, branch `main`). Training pipeline, API skeleton, Compose stack and CI exist; see `README.md` for status and `docs/open-questions.md` for undecided points. Still missing: Grafana dashboards, SHAP/LIME, fairness analysis, batch endpoint, CI deploy step.
+Git repo (origin `github.com/locnp13/ddm501-final`, branch `main`). Training pipeline, API skeleton, Compose stack and CI exist; see `README.md` for status and `docs/open-questions.md` for undecided points. Still missing: SHAP/LIME, fairness analysis, batch endpoint, CI deploy step.
 
 ## Commands
 
 Everything runs in Docker; no Python install on the host is needed.
 
-- Start stack: `docker compose up -d --build` (MLflow on host port 5001, MinIO 9000/9001, Prometheus 9090, Grafana 3000). The API and web UI are no longer in Compose: they run on minikube and are reached through the Ingress after `kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8088:80` (UI at http://localhost:8088, API under `/api`)
+- Start stack: `docker compose up -d --build` (MLflow on host port 5001, MinIO 9000/9001; Compose holds only infrastructure). The API, web UI and the whole monitoring stack are not in Compose: they run on minikube and are reached through the Ingress after `kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8088:80` (UI at http://localhost:8088, API under `/api`, Grafana `/grafana/`, Prometheus `/prometheus/`, Alertmanager `/alertmanager/`)
 - Train (DVC: `ingest` then `train`; compares 4 models x feature sets x sensitive-column setting by CV, tunes XGBoost, calibrates, and if the 3-part gate passes registers the model with alias `challenger`): `GIT_COMMIT=$(git rev-parse HEAD) GIT_DIRTY=$(git status --porcelain | wc -l) docker compose run --rm trainer dvc repro` (the env vars tag the MLflow run for reproducibility)
 - Approve a model (human step, never automatic): in the web UI's Mô hình tab press Duyệt and enter `ADMIN_KEY` from `.env` (API `POST /v1/model/promote`, loads the model and serves it at once), or `docker compose run --rm trainer python -m src.training.promote [VERSION]` (the K8s API pods then pick the new champion up within `MODEL_POLL_SECONDS`=30s). The API serves `models:/churn-model@champion`; training only ever sets `challenger`. Every registered version is kept; the UI's version table has Khôi phục (`POST /v1/model/rollback`), which loads and test-scores the target before moving the alias. `MODEL_URI=models:/churn-model/N` pins an instance to one version, `MODEL_POLL_SECONDS>0` makes it follow the alias (see `docs/rollout-strategies.md`)
 - The API loads the champion at startup and when a model is approved through the UI; a champion changed by other means (MLflow UI, `promote` script) is followed by the K8s pods within 30s (`kubectl -n churn rollout restart deploy/api` forces it)
@@ -19,6 +19,8 @@ Everything runs in Docker; no Python install on the host is needed.
 - Data remote is the `dvc` bucket on MinIO: `docker compose run --rm trainer dvc push|pull`
 
 ## Architecture
+
+Monitoring lives in `k8s/monitoring/` (Prometheus scraping each API pod via pod annotations, Alertmanager, Grafana with provisioned dashboards, and `src/alerts/hub.py`, the webhook receiver behind the UI's Cảnh báo tab). Alert rules have unit tests (`alerts_test.yml`, run with `promtool test rules`; CI does it). The Kubernetes Secret is created from `.env` and must contain `ADMIN_KEY` and `GRAFANA_ADMIN_PASSWORD`.
 
 Deployment topology, the deploy/model lifecycle flows, operations and known gaps are in `docs/deployment-guide.md`; keep it current when those change.
 

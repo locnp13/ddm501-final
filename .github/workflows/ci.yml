@@ -18,6 +18,14 @@ jobs:
       - run: pip install -r requirements-train.txt ruff==0.12.0 pytest-cov
       - run: ruff check src tests
       - run: pytest --cov=src --cov-report=term-missing
+      - name: Validate monitoring configuration and manifests
+        run: |
+          prom="docker run --rm --entrypoint promtool -v $PWD/k8s/monitoring/prometheus:/etc/prometheus -w /etc/prometheus prom/prometheus:v2.55.1"
+          $prom check config /etc/prometheus/prometheus.yml
+          $prom test rules alerts_test.yml
+          docker run --rm --entrypoint amtool -v "$PWD/k8s/monitoring/alertmanager:/cfg" prom/alertmanager:v0.27.0 check-config /cfg/alertmanager.yml
+          for f in k8s/monitoring/grafana/dashboards/*.json; do python -m json.tool "$f" > /dev/null; done
+          for dir in k8s/base k8s/monitoring k8s/canary; do kubectl kustomize "$dir" > /dev/null; done
 
   build:
     needs: lint-test

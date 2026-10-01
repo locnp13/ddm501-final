@@ -27,8 +27,10 @@ ADMIN_KEY = os.getenv("ADMIN_KEY", "")  # empty disables model approval through 
 # > 0: follow the registry alias, so several replicas converge after an approval or rollback.
 MODEL_POLL_SECONDS = float(os.getenv("MODEL_POLL_SECONDS", "0"))
 
-REQUESTS = Counter("churn_requests_total", "Requests by endpoint and status", ["endpoint", "status"])
-LATENCY = Histogram("churn_request_latency_seconds", "Request latency", ["endpoint"])
+REQUESTS = Counter(
+    "churn_requests_total", "Requests by endpoint, status and model version", ["endpoint", "status", "model_version"]
+)
+LATENCY = Histogram("churn_request_latency_seconds", "Request latency", ["endpoint", "model_version"])
 PREDICTIONS = Counter("churn_predictions_total", "Predictions by class and model version", ["label", "model_version"])
 CHURN_PROBABILITY = Histogram(
     "churn_probability", "Predicted churn probability", ["model_version"], buckets=[i / 10 for i in range(11)]
@@ -150,7 +152,7 @@ def metrics() -> Response:
 @app.exception_handler(RequestValidationError)
 async def count_validation_errors(request: Request, exc: RequestValidationError):
     """Count rejected requests (422) so monitoring sees bad input, then answer as FastAPI would."""
-    REQUESTS.labels(request.url.path.removeprefix("/v1/"), "422").inc()
+    REQUESTS.labels(request.url.path.removeprefix("/v1/"), "422", served_version()).inc()
     return await request_validation_exception_handler(request, exc)
 
 
@@ -162,6 +164,7 @@ def predict(features: CustomerFeatures) -> PredictResponse:
     seen in training is still scored, with a warning in the response.
     """
     start = time.perf_counter()
+    version = served_version()
     try:
         if state["model"] is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
@@ -170,23 +173,22 @@ def predict(features: CustomerFeatures) -> PredictResponse:
         unknown = unknown_categories(features)
         for field, _ in unknown:
             UNKNOWN_CATEGORY.labels(field).inc()
-        version = served_version()
         PREDICTIONS.labels("churn" if prob >= 0.5 else "stay", version).inc()
         CHURN_PROBABILITY.labels(version).observe(prob)
-        REQUESTS.labels("predict", "200").inc()
+        REQUESTS.labels("predict", "200", version).inc()
         return PredictResponse(
             churn_probability=prob,
             model_version=version if version != "unknown" else None,
             warnings=[f"{field}: unseen category {value!r}" for field, value in unknown],
         )
     except HTTPException as exc:
-        REQUESTS.labels("predict", str(exc.status_code)).inc()
+        REQUESTS.labels("predict", str(exc.status_code), version).inc()
         raise
     except Exception as exc:
-        REQUESTS.labels("predict", "500").inc()
+        REQUESTS.labels("predict", "500", version).inc()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
-        LATENCY.labels("predict").observe(time.perf_counter() - start)
+        LATENCY.labels("predict", version).observe(time.perf_counter() - start)
 
 
 @app.get("/v1/model")

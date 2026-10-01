@@ -1,6 +1,7 @@
 "use strict";
 
 const API = "/api";
+const HUB = "/hub"; // the alert hub (Alertmanager webhook receiver), see src/alerts/hub.py
 const HISTORY_KEY = "churn.history";
 const HISTORY_MAX = 100;
 const YES_NO = [["Yes", "Có"], ["No", "Không"]];
@@ -71,6 +72,7 @@ const labelOf = (field, value) => (field.options?.find(([v]) => v === String(val
 let modelInfo = null; // GET /v1/model, null until loaded or when no model
 let challenger = null; // GET /v1/model/challenger, null when nothing awaits approval
 let versions = []; // GET /v1/model/versions, newest first
+let alertState = null; // GET /hub/alerts, null when the hub cannot be reached
 
 // ---------- tabs ----------
 function showTab(name) {
@@ -78,6 +80,7 @@ function showTab(name) {
   $$(".tab").forEach((s) => { s.hidden = s.id !== `tab-${name}`; });
   if (name === "model") renderModel();
   if (name === "history") renderHistory();
+  if (name === "alerts") renderAlerts();
   history.replaceState(null, "", `#${name}`);
 }
 $("#tabs").addEventListener("click", (e) => {
@@ -541,6 +544,51 @@ $("#approve-form").addEventListener("submit", async (ev) => {
   }
 });
 
+// ---------- alerts ----------
+const SEVERITY = { critical: ["high", "Nghiêm trọng"], warning: ["mid", "Cảnh báo"], info: ["info", "Thông tin"] };
+
+async function loadAlerts() {
+  try {
+    const res = await fetch(`${HUB}/alerts?limit=30`);
+    alertState = res.ok ? await res.json() : null;
+  } catch { alertState = null; }
+  const badge = $("#alerts-badge"), firing = alertState?.counts.firing ?? 0;
+  badge.hidden = firing === 0;
+  badge.textContent = firing;
+  badge.classList.toggle("critical", (alertState?.counts.critical ?? 0) > 0);
+  return alertState;
+}
+
+function alertRow(a, resolved = false) {
+  const [cls, label] = SEVERITY[a.severity] ?? SEVERITY.warning;
+  const where = Object.entries(a.labels).filter(([k]) => ["pod", "track", "field"].includes(k)).map(([k, v]) => `${k}=${v}`).join(" · ");
+  const when = resolved ? `đã xử lý ${new Date(a.ended_at || a.received_at).toLocaleString("vi-VN")}` : `từ ${new Date(a.started_at).toLocaleString("vi-VN")}`;
+  return `<div class="alert-row"><span class="badge ${cls}">${label}</span>
+    <div><b>${esc(a.name)}</b> ${a.status === "resolved" ? '<span class="badge low">đã xử lý</span>' : ""}<div>${esc(a.summary)}</div>
+    ${a.description ? `<div class="meta">${esc(a.description)}</div>` : ""}${where ? `<div class="meta mono">${esc(where)}</div>` : ""}</div>
+    <div class="meta">${esc(when)}</div></div>`;
+}
+
+async function renderAlerts() {
+  const box = $("#alerts-content");
+  const state = await loadAlerts();
+  const host = location.origin;
+  const tools = `<div class="links"><a class="btn" href="${host}/grafana/dashboards" target="_blank" rel="noopener">Dashboard Grafana</a>
+    <a class="btn" href="${host}/alertmanager/" target="_blank" rel="noopener">Alertmanager</a>
+    <a class="btn" href="${host}/prometheus/alerts" target="_blank" rel="noopener">Luật trong Prometheus</a></div>`;
+  if (!state) {
+    box.innerHTML = `<div class="card"><h2>Cảnh báo</h2><div class="error">Không kết nối được hub cảnh báo (<span class="mono">${HUB}/alerts</span>). Giám sát có thể chưa được triển khai.</div></div>`;
+    return;
+  }
+  const active = state.active.length
+    ? state.active.map((a) => alertRow(a)).join("")
+    : '<div class="ok-banner">Không có cảnh báo nào đang bắn.</div>';
+  const past = state.history.filter((e) => e.status === "resolved" || !state.active.some((a) => a.id === e.id));
+  box.innerHTML = `<div class="card"><div class="spread"><h2 style="margin:0">Đang bắn (${state.counts.firing})</h2>${tools}</div>
+      <p class="muted" style="margin:6px 0 4px">Alertmanager gửi cảnh báo tới hub cảnh báo của hệ thống bằng webhook, trang này đọc lại từ đó mỗi 20 giây.</p>${active}</div>
+    <div class="card"><h2>Sự kiện gần đây</h2>${past.length ? past.map((e) => alertRow(e, e.status === "resolved")).join("") : '<p class="muted">Chưa có sự kiện nào. Hub chỉ nhớ các sự kiện từ lần khởi động gần nhất.</p>'}</div>`;
+}
+
 // ---------- status + links ----------
 async function refreshStatus() {
   const dot = $("#status-dot"), text = $("#status-text");
@@ -550,6 +598,7 @@ async function refreshStatus() {
     dot.className = `dot ${h.model_loaded ? "ok" : "bad"}`;
     if (h.model_loaded && !modelInfo) await loadModel();
     await loadChallenger();
+    loadAlerts();
     text.textContent = h.model_loaded ? `API sẵn sàng${modelInfo ? ` · model v${modelInfo.version}` : ""}` : "API chạy nhưng chưa có model";
   } catch {
     dot.className = "dot bad";
@@ -562,8 +611,9 @@ function buildLinks() {
   const links = [
     ["Swagger / OpenAPI", `${location.origin}${API}/docs`],
     ["MLflow", `http://${host}:5001`],
-    ["Grafana", `http://${host}:3000`],
-    ["Prometheus", `http://${host}:9090`],
+    ["Grafana", `${location.origin}/grafana/dashboards`],
+    ["Prometheus", `${location.origin}/prometheus/`],
+    ["Alertmanager", `${location.origin}/alertmanager/`],
   ];
   $("#doc-links").innerHTML = links.map(([l, u]) => `<a class="btn" href="${u}" target="_blank" rel="noopener">${l}</a>`).join("");
 }
@@ -578,4 +628,4 @@ $$("[data-sample]").forEach((b) => b.addEventListener("click", () => fillForm(SA
 refreshStatus();
 setInterval(refreshStatus, 20000);
 const initial = location.hash.slice(1);
-if (["predict", "history", "model", "docs"].includes(initial)) showTab(initial);
+if (["predict", "history", "model", "alerts", "docs"].includes(initial)) showTab(initial);

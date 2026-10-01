@@ -15,18 +15,20 @@ flowchart LR
   end
   subgraph MAC[Mac của người phụ trách]
     RUN[Self-hosted runner<br/>nhãn churn-local]
-    subgraph DC[Docker Compose]
+    subgraph DC[Docker Compose - hạ tầng]
       PG[(Postgres)]
       MN[(MinIO)]
       ML[MLflow :5001]
-      PR[Prometheus :9090]
-      GF[Grafana :3000]
       TR[trainer<br/>dvc repro]
     end
     subgraph K8S[minikube, profile churn, namespace churn]
       ING[Ingress nginx]
       API[api x2<br/>/api/*]
       FE[frontend x1]
+      PR[Prometheus<br/>/prometheus]
+      AM[Alertmanager<br/>/alertmanager]
+      HUB[alert-hub]
+      GF[Grafana<br/>/grafana]
     end
   end
   CI --> GHCR
@@ -34,11 +36,16 @@ flowchart LR
   RUN -->|build arm64, kubectl apply| K8S
   ING --> API
   ING --> FE
+  ING --> GF
   API -->|host.minikube.internal:5001| ML
   TR --> ML
   ML --> PG
   ML --> MN
-  PR -.->|không scrape được pod| API
+  PR -->|quét từng pod| API
+  PR -->|luật cảnh báo| AM
+  AM -->|webhook| HUB
+  GF --> PR
+  FE -.->|tab Cảnh báo, hỏi định kỳ| HUB
 ```
 
 | Thành phần | Chạy ở | Vai trò | Truy cập |
@@ -46,7 +53,10 @@ flowchart LR
 | Postgres | Compose | Metadata của MLflow (run, version, alias) | nội bộ |
 | MinIO | Compose | File model, artifact, dữ liệu DVC (bucket `mlflow`, `dvc`) | 9000 (S3), 9001 (console) |
 | MLflow | Compose | Tracking server và Model Registry | http://localhost:5001 |
-| Prometheus, Grafana | Compose | Giám sát (xem mục 7) | :9090, :3000 |
+| Prometheus | minikube | Quét từng pod API, đánh giá 11 luật cảnh báo, giữ dữ liệu 7 ngày (PVC) | `/prometheus/` |
+| Alertmanager | minikube | Gom nhóm cảnh báo, gửi webhook tới alert-hub | `/alertmanager/` |
+| alert-hub | minikube | Nhận webhook, giữ danh sách cảnh báo cho tab Cảnh báo (cùng image với API, một bản sao) | tab Cảnh báo |
+| Grafana | minikube | 3 dashboard: API, Mô hình, So sánh phiên bản | `/grafana/` (admin) |
 | trainer | Compose (profile `train`) | Chạy pipeline huấn luyện | `docker compose run --rm trainer ...` |
 | api (2 bản sao) | minikube | Dự đoán, duyệt/khôi phục model | `http://localhost:8088/api/...` |
 | frontend | minikube | Giao diện web | http://localhost:8088 |
@@ -87,16 +97,29 @@ dvc repro --> qua quality gate? --yes--> alias "challenger" (CHƯA phục vụ)
 
 `kubectl apply -k k8s/canary` thêm một bản API **ghim** vào một phiên bản (mặc định v2) và nhận 20% lưu lượng `/api`. Nó tách rời khỏi luồng duyệt model: chưa có luồng "challenger vào canary rồi mới duyệt". Xem `k8s/README.md`.
 
+### 2.4 Giám sát và cảnh báo
+
+```
+pod API --/metrics--> Prometheus --luật--> Alertmanager --webhook--> alert-hub <--hỏi 20s-- tab Cảnh báo
+                          |
+                          +--> Grafana (Churn: API, Churn: Mô hình, Churn: So sánh phiên bản)
+```
+
+- Prometheus tìm pod nhờ annotation `prometheus.io/*` và quét **từng pod** (không qua Service), nên bộ đếm của hai bản sao không bị trộn. Pod canary (`track=canary`) cũng được quét.
+- Cảnh báo về tới giao diện bằng **webhook**: trang giao diện là tệp tĩnh nên không tự nhận webhook, vì vậy alert-hub nhận và giao diện hỏi lại định kỳ. Chấm đỏ trên tab cho biết số cảnh báo đang bắn.
+- Hub chỉ nhớ danh sách trong bộ nhớ: sau khi khởi động lại nó đọc lại các cảnh báo **đang bắn** từ Alertmanager, nhưng **nhật ký sự kiện đã xử lý bị mất**.
+- Ngưỡng và ý nghĩa từng luật: bảng trong `README.md`, mục Giám sát. Mỗi luật có test với dữ liệu giả (`k8s/monitoring/prometheus/alerts_test.yml`).
+
 ## 3. Chạy lần đầu
 
 Yêu cầu: Docker Desktop (khuyến nghị cấp từ 8 GB RAM), minikube, kubectl, `gh` đã đăng nhập, Python không cần cài.
 
 ```bash
 # 1. Khóa quản trị (tệp .env không được commit)
-cp .env.example .env            # đặt ADMIN_KEY, ví dụ: openssl rand -hex 24
+cp .env.example .env            # đặt ADMIN_KEY và GRAFANA_ADMIN_PASSWORD, ví dụ: openssl rand -hex 24
 
 # 2. Hạ tầng
-docker compose up -d --build    # MLflow, MinIO, Postgres, Prometheus, Grafana
+docker compose up -d --build    # MLflow, MinIO, Postgres
 
 # 3. Huấn luyện, tạo model đầu tiên
 GIT_COMMIT=$(git rev-parse HEAD) GIT_DIRTY=$(git status --porcelain | wc -l) \
@@ -107,7 +130,7 @@ minikube start -p churn --driver=docker --cpus=4 --memory=4096
 minikube -p churn addons enable ingress
 kubectl apply -f k8s/base/namespace.yaml
 kubectl -n churn create secret generic churn-secrets --from-env-file=.env   # tạo tay một lần
-scripts/deploy-local.sh                                                      # build + triển khai
+scripts/deploy-local.sh                                                      # build + triển khai api, frontend và giám sát
 
 # 5. Mở cổng ra máy rồi vào http://localhost:8088, tab Mô hình, duyệt model đầu tiên
 kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8088:80
@@ -168,16 +191,29 @@ Cấu hình qua biến môi trường của API: `MODEL_URI` (mặc định `mod
 | Khôi phục trả 422 | Phiên bản cũ không tương thích schema API hiện tại | Không có gì thay đổi; chọn phiên bản khác |
 | Deploy báo runner không chạy | Dịch vụ runner dừng hoặc Mac tắt | `./svc.sh start`, mở Docker Desktop, bấm lại |
 | `dvc repro` thoát mã khác 0 | Không qua quality gate | Xem tag `gate_failures` của run trên MLflow |
-| Prometheus báo `ApiDown` | Prometheus không với tới pod trong cụm (mục 7) | Hiện là hạn chế đã biết |
+| Dashboard Grafana trống | Chưa có lưu lượng (nhiều số liệu là tỷ lệ theo thời gian), hoặc Prometheus không quét được pod | Gửi vài yêu cầu dự đoán; mở `/prometheus/targets` xem `churn-api` có `up` |
+| Không đăng nhập được Grafana | Dùng sai mật khẩu | Tài khoản `admin`, mật khẩu là `GRAFANA_ADMIN_PASSWORD` trong Secret `churn-secrets` (đổi trong `.env` thì tạo lại Secret và `rollout restart deploy/grafana`) |
+| Cảnh báo đã bắn trên Prometheus mà tab Cảnh báo trống | alert-hub chưa nhận được webhook | Xem `/alertmanager/` (nhóm có gửi không) và `kubectl -n churn logs deploy/alert-hub`; hub tự đọc lại cảnh báo đang bắn từ Alertmanager khi khởi động |
+| Cảnh báo `PredictionDrift` bất ngờ | Có lưu lượng bị lệch (ví dụ thử nghiệm lặp lại một khách) | Đúng thiết kế: tự hết khi dữ liệu lệch quá 1 giờ |
 
 ## 7. Chưa làm hoặc chưa kiểm chứng
 
-- **Giám sát API bị hỏng.** Prometheus (Compose) scrape `api:8000`, mục tiêu này không còn từ khi API chuyển sang K8s, và nó không với tới pod. Cảnh báo `ApiDown` sẽ kích hoạt; số liệu API không lên Grafana. Cần đưa Prometheus vào cụm hoặc cho nó scrape từng pod.
 - **Image chạy trên cụm không phải image CI đã đẩy lên GHCR.** CI build amd64, cụm chạy arm64, nên runner build lại. Deploy đúng image CI cần build đa kiến trúc.
 - **Cần Mac bật, đã đăng nhập và Docker Desktop chạy** để deploy được; đây là điểm đơn lẻ có thể hỏng. Không có môi trường dự phòng.
 - **Runner trên repo công khai** vẫn là rủi ro: PR từ người ngoài phải được duyệt trước khi chạy CI, và workflow deploy chỉ chạy tay, nhưng nếu một thành viên duyệt nhầm PR độc hại thì mã của nó chạy trên máy này. `main` chưa bật bảo vệ nhánh.
 - **Canary và A/B chưa nối với luồng duyệt model.** A/B còn thiếu mã khách hàng trong request và nhật ký dự đoán (xem `rollout-strategies.md`).
 - **Postgres, MinIO, MLflow chưa chạy trong cụm**; image MinIO là bản đóng băng (`bitnamilegacy`). Chưa có sao lưu volume Docker: mất volume là mất model.
 - **Mật khẩu mặc định** của MinIO, Grafana, Postgres vẫn nằm trong `docker-compose.yml` (Q20 chưa chuyển hết sang `.env`); mới có `ADMIN_KEY`.
-- **Chưa có Grafana dashboard**, SHAP/LIME, phân tích công bằng, endpoint `/v1/predict/batch`.
+- SHAP/LIME, phân tích công bằng, endpoint `/v1/predict/batch` chưa làm.
 - Các tình huống lỗi đánh dấu "Chưa" ở mục 4 chưa được thử thật.
+
+Về giám sát cụ thể:
+
+- **Cảnh báo chỉ vào tab Cảnh báo của giao diện.** Chưa có kênh gửi ra ngoài (Slack, Telegram, email); thêm một receiver vào `k8s/monitoring/alertmanager/alertmanager.yml` là đủ.
+- **Ngưỡng cảnh báo là điểm khởi đầu chưa đo từ dữ liệu thật**; nền 0,27 của `PredictionDrift` được ghi cứng trong luật.
+- **Drift chỉ dựa trên xác suất trung bình và category lạ**, chưa có PSI theo từng feature và chưa lưu nhật ký dự đoán.
+- **Dashboard Grafana mới được kiểm tra bằng truy vấn** (31 trong 33 biểu thức có dữ liệu, 0 lỗi; 2 biểu thức lỗi 5xx đã được sửa để hiện 0), tôi chưa xem giao diện Grafana bằng mắt. Dashboard "So sánh phiên bản" chưa được chạy với hai phiên bản thật.
+- **Hạ tầng không được giám sát**: MLflow, MinIO, Postgres và tài nguyên của node chưa có số liệu hay cảnh báo.
+- **Dữ liệu giám sát nằm trên máy này**: Prometheus (PVC minikube, 7 ngày) mất nếu xóa cụm; Alertmanager và Grafana dùng `emptyDir`.
+- **Liên kết trong Alertmanager/Prometheus dùng `localhost:8088`** (địa chỉ cổng chuyển tiếp), nên chỉ đúng khi mở qua cổng đó.
+- **Sau khi bấm deploy, nhật ký cảnh báo trong hub bị xóa** vì pod hub được khởi động lại.

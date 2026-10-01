@@ -1,0 +1,34 @@
+# Grafana, Prometheus and Alertmanager are configured to serve under these prefixes, so no rewrite is needed.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring
+  namespace: churn
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - {path: /grafana, pathType: Prefix, backend: {service: {name: grafana, port: {name: http}}}}
+          - {path: /prometheus, pathType: Prefix, backend: {service: {name: prometheus, port: {name: http}}}}
+          - {path: /alertmanager, pathType: Prefix, backend: {service: {name: alertmanager, port: {name: http}}}}
+---
+# The UI reads alerts through /hub/alerts. The webhook is NOT exposed: only Alertmanager, inside the
+# cluster, can post to the hub.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: alert-hub
+  namespace: churn
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /hub/(alerts)
+            pathType: ImplementationSpecific
+            backend:
+              service: {name: alert-hub, port: {name: http}}

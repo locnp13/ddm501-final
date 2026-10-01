@@ -1,0 +1,106 @@
+# Thresholds are starting points for this project, not measured service-level objectives.
+groups:
+  - name: churn-api
+    rules:
+      - alert: ApiNoTargets
+        expr: absent(up{job="churn-api"})
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Prometheus sees no API pod"
+          description: "No target for job churn-api for 2 minutes: the pods are gone or discovery is broken."
+
+      - alert: ApiDown
+        expr: up{job="churn-api"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "API pod {{ $labels.pod }} is unreachable"
+          description: "Prometheus cannot scrape {{ $labels.pod }} (track {{ $labels.track }})."
+
+      - alert: ReplicaLost
+        expr: count(up{job="churn-api", track="stable"} == 1) < 2
+        for: 3m
+        labels: {severity: warning}
+        annotations:
+          summary: "Fewer than 2 stable API pods are up"
+          description: "The stable API runs with 2 replicas; one is missing, so there is no spare capacity."
+
+      - alert: ModelNotLoaded
+        expr: churn_model_loaded == 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "API pod {{ $labels.pod }} has no model"
+          description: "The pod is up but cannot answer predictions: no champion in the registry or MLflow is unreachable."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(churn_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(churn_requests_total[5m])), 1e-9) > 0.05
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "More than 5% of prediction requests fail"
+          description: "Server errors (5xx) are above 5% of requests over 5 minutes."
+
+      - alert: HighValidationErrorRate
+        expr: |
+          sum(rate(churn_requests_total{status="422"}[10m]))
+            / clamp_min(sum(rate(churn_requests_total[10m])), 1e-9) > 0.2
+          and sum(rate(churn_requests_total[10m])) > 0.01
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 20% of requests are rejected as invalid"
+          description: "Clients keep sending data the API rejects (422); check the caller or a schema change."
+
+      - alert: HighP95Latency
+        expr: histogram_quantile(0.95, sum(rate(churn_request_latency_seconds_bucket[5m])) by (le)) > 0.5
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "p95 prediction latency above 500 ms"
+          description: "The 95th percentile of /v1/predict latency is above 0.5 s over 5 minutes."
+
+      - alert: HighMemory
+        expr: process_resident_memory_bytes{job="churn-api"} > 600 * 1024 * 1024
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "API pod {{ $labels.pod }} is close to its memory limit"
+          description: "Resident memory above 600 MiB; the pod limit is 768 MiB, so it risks being OOM-killed."
+
+  - name: churn-model
+    rules:
+      - alert: UnknownCategorySpike
+        expr: |
+          sum(rate(churn_unknown_category_total[15m]))
+            / clamp_min(sum(rate(churn_predictions_total[15m])), 1e-9) > 0.05
+          and sum(rate(churn_predictions_total[15m])) > 0.01
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Inputs contain categories never seen in training"
+          description: "More than 5% of predictions carry an unseen category: possible data drift or a new upstream value."
+
+      # Calibrated probabilities average out to the churn rate of the population they describe. The
+      # training set has about 27% churners, so a sustained shift means the inputs changed.
+      - alert: PredictionDrift
+        expr: |
+          abs(
+            sum(rate(churn_probability_sum[1h])) / clamp_min(sum(rate(churn_probability_count[1h])), 1e-9) - 0.27
+          ) > 0.10
+          and sum(increase(churn_probability_count[1h])) > 50
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Average predicted churn probability drifted from the training rate"
+          description: "The 1h mean probability is more than 0.10 away from 0.27 (about 50 predictions or more): the population may have changed."
+
+      - alert: ModelChanged
+        expr: sum(increase(churn_model_changes_total[10m])) > 0
+        labels: {severity: info}
+        annotations:
+          summary: "The served model changed"
+          description: "An approval, rollback or registry sync switched the model in the last 10 minutes (see the model dashboard)."

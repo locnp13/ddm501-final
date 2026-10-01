@@ -31,7 +31,7 @@ Mục tiêu: kiểm tra phiên bản mới chạy ổn định với một phầ
 - Đã kiểm tra bằng `k8s/canary/`: trọng số 20% cho 21,5% yêu cầu vào canary. Lưu ý: ingress-nginx chia canary **theo Service**, nên lệnh duyệt/khôi phục phải đi qua Service riêng (`api-admin`) để không rơi vào bản ghim (xem `k8s/README.md`).
 - Hai Deployment dùng cùng image API: `churn-api-stable` ghim phiên bản hiện tại (ví dụ `models:/churn-model/3`) và `churn-api-canary` ghim phiên bản mới (`models:/churn-model/4`).
 - Chia lưu lượng ở tầng Ingress hoặc service mesh (ingress-nginx với annotation canary-weight, Argo Rollouts hoặc Istio VirtualService), ví dụ 5% rồi 25% rồi 100%.
-- So sánh hai phiên bản trên Grafana, ví dụ:
+- So sánh hai phiên bản trên Grafana: dashboard **Churn: So sánh phiên bản** đã có sẵn (tách theo `model_version`: yêu cầu/giây, lỗi 5xx, p95, xác suất trung bình, tỷ lệ dự đoán churn). Các truy vấn tương ứng:
   - Tỷ lệ dự đoán churn theo phiên bản: `sum by (model_version) (rate(churn_predictions_total{label="churn"}[10m])) / sum by (model_version) (rate(churn_predictions_total[10m]))`
   - Trung vị xác suất: `histogram_quantile(0.5, sum by (le, model_version) (rate(churn_probability_bucket[10m])))`
   - Tỷ lệ lỗi và p95 độ trễ theo `pod`/`instance` (đã có luật cảnh báo toàn cục).
@@ -53,4 +53,4 @@ A/B khác canary ở mục tiêu: **đo xem phiên bản nào mang lại kết q
 - Postgres, MinIO, MLflow chưa chạy trong cụm (vẫn ở Docker Compose).
 - Mã khách hàng trong request và việc lưu nhật ký dự đoán (cần cho A/B).
 - Cách lưu `ADMIN_KEY` an toàn trên K8s (Secret) và bảo vệ các endpoint duyệt khi có nhiều bản sao (hiện chỉ có khóa dùng chung).
-- Dashboard Grafana so sánh phiên bản (các truy vấn ở mục 3 mới là gợi ý).
+- Chưa chạy canary thật với dashboard so sánh phiên bản (dashboard được kiểm tra với một phiên bản duy nhất).

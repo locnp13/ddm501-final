@@ -123,7 +123,7 @@ def test_rejected_requests_never_reach_the_model(client) -> None:
 
 def test_422_is_counted_in_metrics(client) -> None:
     client.post("/v1/predict", json={**features(), "tenure": -1})
-    assert 'churn_requests_total{endpoint="predict",status="422"}' in client.get("/metrics").text
+    assert 'churn_requests_total{endpoint="predict",model_version="1",status="422"}' in client.get("/metrics").text
 
 
 def test_unseen_category_is_scored_with_warning(client) -> None:

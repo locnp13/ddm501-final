@@ -1,0 +1,48 @@
+# Receives Alertmanager webhooks and serves the recent alerts to the web UI (see src/alerts/hub.py).
+# Runs the API image with another command. One replica: the alerts are kept in memory.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-hub
+  namespace: churn
+  labels: {app: alert-hub}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: alert-hub}
+  template:
+    metadata:
+      labels: {app: alert-hub}
+    spec:
+      containers:
+        - name: alert-hub
+          image: churn-api:dev
+          imagePullPolicy: IfNotPresent
+          command: [uvicorn, src.alerts.hub:app, --host, 0.0.0.0, --port, "8080"]
+          env:
+            - {name: ALERTMANAGER_URL, value: "http://alertmanager:9093/alertmanager"}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {memory: 192Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-hub
+  namespace: churn
+spec:
+  selector: {app: alert-hub}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
