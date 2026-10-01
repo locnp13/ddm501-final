@@ -37,7 +37,7 @@ Client -> FastAPI /v1/predict  <-- nạp model ------------+
                                           +-> Grafana (3 dashboard)
 ```
 
-Kiến trúc triển khai hiện tại (Compose + Kubernetes + runner) và hướng dẫn vận hành: [`docs/deployment-guide.md`](docs/deployment-guide.md). Sơ đồ luồng MLOps: [`docs/mlops-flow.html`](docs/mlops-flow.html). Đặc tả pipeline huấn luyện: [`docs/spec-churn-training-pipeline.md`](docs/spec-churn-training-pipeline.md).
+Thiết kế đầy đủ (sơ đồ kiến trúc, luồng dữ liệu, lý do chọn công nghệ, đánh đổi): [`ARCHITECTURE.md`](ARCHITECTURE.md). Kiến trúc triển khai hiện tại (Compose + Kubernetes + runner) và hướng dẫn vận hành: [`docs/deployment-guide.md`](docs/deployment-guide.md). Sơ đồ luồng MLOps: [`docs/mlops-flow.html`](docs/mlops-flow.html). Đặc tả pipeline huấn luyện: [`docs/spec-churn-training-pipeline.md`](docs/spec-churn-training-pipeline.md).
 
 ### Các service trong `docker-compose.yml`
 
@@ -72,6 +72,8 @@ GIT_COMMIT=$(git rev-parse HEAD) GIT_DIRTY=$(git status --porcelain | wc -l) \
 # 3. Duyệt model (bước của con người): mở http://localhost:8088, tab Mô hình, xem bảng so sánh rồi bấm Duyệt
 #    (cần ADMIN_KEY trong .env). API nạp model mới ngay, không cần restart.
 ```
+
+Sau lần cài đặt đầu, mỗi lần dùng chỉ cần chạy `./run.sh`: script bật Docker Desktop, các container Compose và minikube nếu chưa chạy, deploy lên cụm nếu chưa có, mở cổng 8088 ra máy rồi mở các URL bên dưới trong trình duyệt. `./run.sh stop` tắt phần chuyển tiếp cổng (container và minikube vẫn chạy). Script không huấn luyện hay duyệt model; nếu chưa có `champion` nó chỉ nhắc.
 
 Sau đó:
 
