@@ -10,8 +10,6 @@ mlruns/
 mlartifacts/
 graphify-out/
 
-# DVC-managed data and generated reports
-/data/raw
-/data/processed
+# Generated reports
 /reports/drift.html
 *.pdf
