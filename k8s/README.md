@@ -1,6 +1,6 @@
 # Kubernetes trên máy local (minikube)
 
-Chỉ `api` và `frontend` chạy trong cụm. Postgres, MinIO và MLflow vẫn chạy bằng Docker Compose trên máy; pod gọi MLflow qua `host.minikube.internal:5001`, nên **stack Compose phải đang chạy** (`docker compose up -d mlflow minio postgres`).
+Chỉ `api` và `frontend` chạy trong cụm. Postgres, MinIO và MLflow vẫn chạy bằng Docker Compose trên máy (Compose không còn `api` và `frontend`); pod gọi MLflow qua `host.minikube.internal:5001`, nên **stack Compose phải đang chạy** (`docker compose up -d mlflow minio postgres`).
 
 ## Dựng cụm
 
@@ -25,20 +25,25 @@ kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8088:80
 
 Cập nhật code bằng tay: `scripts/deploy-local.sh` (build image arm64 vào Docker của cụm, gắn tag theo commit, áp manifest, đợi cuốn bản mới và kiểm tra API có model).
 
-## Tự động deploy khi push
+## Deploy bằng nút trên GitHub
 
-Push vào `main` thì CI chạy `lint-test`, `build`, rồi job **`deploy`** chạy trên một runner cài ở máy này (nhãn `churn-local`) và gọi `scripts/deploy-local.sh <sha>`.
+Actions tab, workflow **Deploy to local Kubernetes**, **Run workflow**, chọn nhánh. Push code **không** tự deploy; CI (`lint-test`, `build`) chỉ kiểm tra.
 
 ```
-push main -> lint-test -> build (kiểm tra Dockerfile, đẩy GHCR) -> deploy (runner trên Mac)
-                                                                    build arm64 -> kubectl apply -> rollout -> smoke test
+Run workflow ─┬─ runner-check (GitHub): chờ tối đa 60s để runner nhận job; không có thì hủy run và báo lỗi rõ
+              └─ deploy (runner trên Mac, nhãn churn-local):
+                   kiểm tra Docker và MLflow -> build image arm64 vào Docker của cụm -> kubectl apply
+                   -> đợi cuốn bản mới -> smoke test (API có model)
 ```
 
-- **Image deploy được build lại trên runner**, không kéo từ GHCR: image CI build là amd64, còn cụm chạy arm64. Hệ quả: image chạy trên cụm không phải đúng tệp CI đã kiểm tra và đẩy lên GHCR.
-- **Điều kiện để chạy**: Mac bật và đăng nhập (runner là LaunchAgent), Docker Desktop đang chạy, và stack Compose (MLflow, MinIO, Postgres) đang chạy. Nếu cụm đang tắt, script tự `minikube start`. Thiếu một trong số đó thì job báo lỗi hoặc nằm chờ.
+- **Kiểm tra runner**: job cho runner offline sẽ nằm chờ tới 24 giờ, nên có một job song song trên GitHub theo dõi xem runner đã nhận `deploy` chưa; sau 60 giây chưa nhận thì hủy run với thông báo cách bật lại runner.
+- **Image được build lại trên runner**, không kéo từ GHCR: image CI build là amd64, còn cụm chạy arm64. Image chạy trên cụm vì vậy không phải đúng tệp CI đã đẩy lên GHCR.
+- **Điều kiện**: Mac bật và đăng nhập (runner là LaunchAgent), Docker Desktop đang chạy, và Compose đang chạy MLflow, MinIO, Postgres. Thiếu Docker hoặc MLflow thì bước kiểm tra trong script báo lỗi ngay. Nếu cụm đang tắt, script tự `minikube start`.
+- **Nút này triển khai bất kể CI của commit đó xanh hay đỏ.** Nên chờ CI xanh trước khi bấm.
 - **Secret `churn-secrets` tạo tay một lần** (xem phần Dựng cụm); script không đụng tới nó.
-- **Cuốn bản mới an toàn**: pod chỉ nhận lưu lượng khi `/ready` trả 200, tức là đã nạp xong model, nên bản cũ không bị tắt trước khi bản mới sẵn sàng.
-- **Bảo mật**: runner trên repo public chạy mã của repo, nên job `deploy` chỉ chạy khi `push` vào `main`, và PR từ người ngoài phải được duyệt trước mới chạy workflow (đã đặt `all_external_contributors`). `main` chưa bật bảo vệ nhánh.
+- **Cuốn bản mới an toàn**: pod chỉ nhận lưu lượng khi `/ready` trả 200, tức là đã nạp xong model.
+- **Bảo mật**: chỉ người có quyền ghi mới bấm được; PR (kể cả từ fork) không chạy được workflow này. PR từ người ngoài phải được duyệt trước khi chạy CI (`all_external_contributors`). `main` chưa bật bảo vệ nhánh.
+- Chạy tay không qua GitHub: `scripts/deploy-local.sh`.
 
 Quản lý runner (cài ở `~/actions-runner-ddm501`):
 
@@ -72,5 +77,5 @@ kubectl delete -k k8s/canary                 # gỡ canary
 
 - **ingress-nginx chia canary theo Service, không theo đường dẫn.** Mọi Ingress trỏ tới Service `api` đều bị chia, kể cả đường dẫn quản trị. Canary là bản ghim nên từ chối duyệt/khôi phục, nên lúc đầu khoảng 20% lệnh duyệt bị từ chối. Vì vậy lệnh quản trị đi qua Service `api-admin` riêng; sau khi sửa, 120/120 yêu cầu quản trị vào đúng nhóm stable.
 - **Image là bản build local** (`churn-api:<commit>`, `imagePullPolicy: IfNotPresent`), không phải image trên GHCR. Luồng tự deploy xem phần trên.
-- **Prometheus của Compose chưa scrape pod trong cụm.** Pod có annotation `prometheus.io/*` nhưng chưa có gì đọc chúng.
+- **Prometheus của Compose không scrape được pod trong cụm** (và target `api:8000` không còn tồn tại), nên số liệu API không lên Grafana và cảnh báo `ApiDown` sẽ kích hoạt. Pod có annotation `prometheus.io/*` nhưng chưa có gì đọc chúng.
 - `kubectl config` chuyển sang context `churn`. Context `minikube` cũ trong kubeconfig trỏ tới cụm không còn tồn tại và không bị đụng tới.

@@ -1,0 +1,52 @@
+name: Deploy to local Kubernetes
+
+# Manual: Actions tab -> "Deploy to local Kubernetes" -> Run workflow (pick the branch to deploy).
+# Only people with write access can start it, and it never runs for pull requests.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-local
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs on GitHub's side. A job for an offline self-hosted runner would otherwise wait for up to
+  # 24 hours, so this fails the run quickly with a clear message when no runner takes the job.
+  runner-check:
+    name: Is the self-hosted runner running?
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Wait for the runner to pick up the deploy job
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 12); do
+            status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" \
+              --jq '.jobs[] | select(.name == "deploy") | .status')"
+            if [ "$status" = "in_progress" ] || [ "$status" = "completed" ]; then
+              echo "Self-hosted runner picked up the deploy job."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error title=Self-hosted runner is not running::No runner with label churn-local took the job within 60s. On the Mac: cd ~/actions-runner-ddm501 && ./svc.sh start (and check Docker Desktop is open)."
+          gh run cancel "$GITHUB_RUN_ID"
+          exit 1
+
+  deploy:
+    name: deploy
+    runs-on: [self-hosted, macOS, ARM64, churn-local]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner info
+        run: echo "Runner ${{ runner.name }} on $(hostname -s), deploying ${{ github.sha }} from ${{ github.ref_name }}"
+      - name: Check, build arm64 images and roll out to minikube
+        run: scripts/deploy-local.sh "${{ github.sha }}"

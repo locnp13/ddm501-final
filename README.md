@@ -45,38 +45,40 @@ Sơ đồ chi tiết: [`docs/mlops-flow.html`](docs/mlops-flow.html). Đặc t�
 | `postgres` | Backend store của MLflow (metadata: run, params, metrics, registry) | - |
 | `minio` | Object storage S3: bucket `mlflow` (artifact/model) và `dvc` (remote dữ liệu) | 9000 (S3), 9001 (console) |
 | `mlflow` | Tracking server + Model Registry | 5001 |
-| `api` | FastAPI phục vụ dự đoán | 8000 |
-| `frontend` | Giao diện web (nginx, trang tĩnh): dự đoán, lịch sử, thông tin mô hình, tài liệu; proxy `/api` sang `api` | 8080 |
 | `trainer` | Chạy pipeline huấn luyện (profile `train`) | - |
 | `prometheus` | Thu thập metric, đánh giá alert rules | 9090 |
 | `grafana` | Dashboard | 3000 |
 
 MLflow dùng cổng 5001 vì cổng 5000 bị AirPlay Receiver chiếm trên macOS.
 
+`api` và `frontend` **không còn nằm trong Compose**: chúng chạy trên Kubernetes (minikube), xem phần Kubernetes bên dưới và [`k8s/README.md`](k8s/README.md).
+
 ## Bắt đầu nhanh
 
-Yêu cầu: Docker và Docker Compose. Không cần cài Python lên máy host.
+Yêu cầu: Docker, Docker Compose, minikube và kubectl. Không cần cài Python lên máy host.
 
 ```bash
 # 0. Tạo khóa quản trị dùng khi duyệt model trên giao diện (tệp .env không được commit)
 cp .env.example .env   # rồi đặt ADMIN_KEY, ví dụ: openssl rand -hex 24
 
-# 1. Khởi động hạ tầng
+# 1. Khởi động hạ tầng (MLflow, MinIO, Postgres, Prometheus, Grafana)
 docker compose up -d --build
 
+# 1b. Dựng cụm Kubernetes và triển khai api + frontend (lần đầu, xem k8s/README.md), rồi mở cổng ra máy:
+kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8088:80
 # 2. Chạy pipeline: tải dữ liệu, kiểm định, huấn luyện, đăng ký model (alias challenger)
 GIT_COMMIT=$(git rev-parse HEAD) GIT_DIRTY=$(git status --porcelain | wc -l) \
   docker compose run --rm trainer dvc repro
 
-# 3. Duyệt model (bước của con người): mở http://localhost:8080, tab Mô hình, xem bảng so sánh rồi bấm Duyệt
+# 3. Duyệt model (bước của con người): mở http://localhost:8088, tab Mô hình, xem bảng so sánh rồi bấm Duyệt
 #    (cần ADMIN_KEY trong .env). API nạp model mới ngay, không cần restart.
 ```
 
 Sau đó:
 
-- Giao diện web: http://localhost:8080 (tab Dự đoán, Lịch sử, Mô hình, Tài liệu)
+- Giao diện web: http://localhost:8088 (qua Ingress của minikube; tab Dự đoán, Lịch sử, Mô hình, Tài liệu)
 - MLflow UI: http://localhost:5001
-- Swagger UI: http://localhost:8000/docs
+- Swagger UI: http://localhost:8088/api/docs
 - MinIO console: http://localhost:9001 (mặc định `minioadmin` / `minioadmin`, đổi bằng biến `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`)
 - Prometheus: http://localhost:9090
 - Grafana: http://localhost:3000 (tài khoản mặc định `admin` / `admin`, chỉ dùng cho môi trường phát triển)
@@ -84,7 +86,7 @@ Sau đó:
 ### Ví dụ gọi API
 
 ```bash
-curl -X POST http://localhost:8000/v1/predict \
+curl -X POST http://localhost:8088/api/v1/predict \
   -H "Content-Type: application/json" \
   -d '{
     "gender": "Female", "SeniorCitizen": 0, "Partner": "Yes", "Dependents": "No",
@@ -125,7 +127,7 @@ Image MinIO chính thức không còn được phát hành công khai, nên comp
 
 ## Kubernetes (local)
 
-`api` và `frontend` chạy được trên minikube, kèm canary theo trọng số; hướng dẫn và các lưu ý ở [`k8s/README.md`](k8s/README.md). Push vào `main` thì CI tự deploy lên cụm này qua runner cài trên máy (xem phần Tự động deploy trong `k8s/README.md`).
+`api` và `frontend` chạy được trên minikube, kèm canary theo trọng số; hướng dẫn và các lưu ý ở [`k8s/README.md`](k8s/README.md). Deploy bằng nút **Run workflow** trên GitHub (tab Actions, workflow *Deploy to local Kubernetes*): kiểm tra runner trên máy đang chạy, rồi build image arm64 và triển khai lên cụm; xem phần Deploy trong `k8s/README.md`.
 
 ## Giám sát
 

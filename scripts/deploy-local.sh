@@ -14,6 +14,12 @@ TAG="${1:-$(git rev-parse --short=12 HEAD)}"
 TAG="${TAG:0:12}"
 cd "$(dirname "$0")/.."
 
+echo "== Pre-flight checks on $(hostname -s)"
+docker info >/dev/null 2>&1 || { echo "ERROR: Docker is not running (start Docker Desktop)"; exit 1; }
+curl -fsS --max-time 5 http://localhost:5001/health >/dev/null \
+  || { echo "ERROR: MLflow is not reachable on localhost:5001 (docker compose up -d mlflow minio postgres)"; exit 1; }
+echo "docker: ok, mlflow: ok"
+
 if ! minikube -p "$PROFILE" status >/dev/null 2>&1; then
   echo "Cluster '$PROFILE' is not running; starting it"
   minikube start -p "$PROFILE" --driver=docker --cpus=4 --memory=4096

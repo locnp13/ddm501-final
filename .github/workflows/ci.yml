@@ -50,19 +50,3 @@ jobs:
             ghcr.io/${{ github.repository }}/${{ matrix.name }}:latest
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-
-  # Runs on the maintainer's Mac (runner label churn-local) and updates the local minikube cluster.
-  # Only on a push to main: pull requests, including ones from forks, must never reach this runner.
-  deploy:
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, macOS, ARM64, churn-local]
-    concurrency:
-      group: deploy-local
-      cancel-in-progress: false
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build for arm64 and roll out to minikube
-        run: scripts/deploy-local.sh "${{ github.sha }}"

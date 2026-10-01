@@ -56,29 +56,6 @@ services:
       timeout: 3s
       retries: 10
 
-  api:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile.api
-    environment:
-      MLFLOW_TRACKING_URI: http://mlflow:5000
-      MODEL_URI: models:/churn-model@champion
-      ADMIN_KEY: ${ADMIN_KEY:-}  # empty disables POST /v1/model/promote
-    depends_on:
-      mlflow:
-        condition: service_healthy
-    ports:
-      - "8000:8000"
-
-  frontend:
-    build:
-      context: frontend
-    depends_on:
-      api:
-        condition: service_healthy
-    ports:
-      - "8080:8080"
-
   trainer:
     build:
       context: .
@@ -103,8 +80,6 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
-    depends_on:
-      - api
     ports:
       - "9090:9090"
 

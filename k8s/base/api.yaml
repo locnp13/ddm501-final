@@ -28,6 +28,7 @@ spec:
             - {name: MLFLOW_TRACKING_URI, value: "http://host.minikube.internal:5001"}
             - {name: MODEL_URI, value: "models:/churn-model@champion"}
             - {name: MODEL_POLL_SECONDS, value: "30"}
+            - {name: ROOT_PATH, value: "/api"}  # the Ingress serves the API under /api
             - name: ADMIN_KEY
               valueFrom:
                 secretKeyRef: {name: churn-secrets, key: ADMIN_KEY, optional: true}

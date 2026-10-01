@@ -48,7 +48,7 @@ A/B khác canary ở mục tiêu: **đo xem phiên bản nào mang lại kết q
 
 ## 5. Chưa làm
 
-- **Đưa image đã được CI kiểm tra (GHCR) lên cụm.** Deploy tự động đã có (`scripts/deploy-local.sh` qua runner trên Mac) nhưng **build lại** image arm64 trên runner vì image CI là amd64. Muốn deploy đúng image CI cần build đa kiến trúc (hoặc dùng runner arm64 của GitHub) và kéo từ GHCR.
+- **Đưa image đã được CI kiểm tra (GHCR) lên cụm.** Deploy bằng nút trên GitHub đã có (workflow `deploy.yml`, `scripts/deploy-local.sh` qua runner trên Mac) nhưng **build lại** image arm64 trên runner vì image CI là amd64. Muốn deploy đúng image CI cần build đa kiến trúc (hoặc dùng runner arm64 của GitHub) và kéo từ GHCR.
 - **Đưa model vào canary tự động.** Duyệt model chỉ đổi alias `champion` cho nhóm stable; canary là việc triển khai tay (`kubectl apply -k k8s/canary`, ghim phiên bản cụ thể). Chưa có luồng "challenger vào canary, đạt tiêu chí thì duyệt".
 - Postgres, MinIO, MLflow chưa chạy trong cụm (vẫn ở Docker Compose).
 - Mã khách hàng trong request và việc lưu nhật ký dự đoán (cần cho A/B).

@@ -120,7 +120,11 @@ async def lifespan(_: FastAPI):
     stop.set()
 
 
-app = FastAPI(title="Churn Prediction API", version="0.1.0", lifespan=lifespan)
+# Behind the Kubernetes Ingress the API is served under /api (the prefix is stripped before it reaches us).
+# ROOT_PATH=/api makes Swagger build its URLs with that prefix; unset when the API is reached directly.
+app = FastAPI(
+    title="Churn Prediction API", version="0.1.0", lifespan=lifespan, root_path=os.getenv("ROOT_PATH", "")
+)
 
 
 @app.get("/health")

@@ -560,7 +560,7 @@ async function refreshStatus() {
 function buildLinks() {
   const host = location.hostname;
   const links = [
-    ["Swagger / OpenAPI", `http://${host}:8000/docs`],
+    ["Swagger / OpenAPI", `${location.origin}${API}/docs`],
     ["MLflow", `http://${host}:5001`],
     ["Grafana", `http://${host}:3000`],
     ["Prometheus", `http://${host}:9090`],
