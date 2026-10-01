@@ -1,0 +1,54 @@
+# The browser talks to the Ingress only: /api goes to the API, everything else to the web UI.
+# (The frontend's own /api proxy is used by Docker Compose, not here, so the Ingress can split API traffic.)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api
+  namespace: churn
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service: {name: api, port: {name: http}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend
+  namespace: churn
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: frontend, port: {name: http}}
+---
+# Admin actions (approve, rollback) always go to the stable pods: a canary is pinned to one version and
+# refuses them. They use the api-admin Service because canary splitting is per Service, not per path.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-admin
+  namespace: churn
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /v1/model/$1
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api/v1/model/(promote|rollback)
+            pathType: ImplementationSpecific
+            backend:
+              service: {name: api-admin, port: {name: http}}

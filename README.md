@@ -123,6 +123,10 @@ docker compose run --rm trainer dvc pull   # lấy dữ liệu đúng phiên b�
 
 Image MinIO chính thức không còn được phát hành công khai, nên compose dùng `bitnamilegacy/minio:2024.12.18` (bản MinIO đóng băng, không nhận bản vá). Phù hợp đồ án, không nên dùng cho production.
 
+## Kubernetes (local)
+
+`api` và `frontend` chạy được trên minikube, kèm canary theo trọng số; hướng dẫn và các lưu ý ở [`k8s/README.md`](k8s/README.md). Chưa có luồng tự deploy khi push code (CI hiện chỉ build và đẩy image lên GHCR).
+
 ## Giám sát
 
 - Metric của API: `churn_requests_total`, `churn_request_latency_seconds`, `churn_predictions_total`, `churn_probability`, `churn_model_loaded`.
@@ -149,6 +153,7 @@ GitHub Actions (`.github/workflows/ci.yml`) chạy khi push lên `main` và khi 
 src/training/     ingest, validate, train, wrapper model
 src/serving/      FastAPI app, thông tin model cho giao diện
 frontend/         giao diện web (nginx + HTML/CSS/JS thuần)
+k8s/              manifest minikube: api, frontend, Ingress, canary
 deploy/           Dockerfile cho api, mlflow, trainer
 monitoring/       Prometheus, alert rules, Grafana provisioning
 tests/            test dữ liệu và quality gate

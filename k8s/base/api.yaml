@@ -1,0 +1,68 @@
+# Stable API: follows the registry alias, so an approval or rollback reaches every replica.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: churn
+  labels: {app: api, track: stable}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: api, track: stable}
+  template:
+    metadata:
+      labels: {app: api, track: stable}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
+    spec:
+      containers:
+        - name: api
+          image: churn-api:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8000}
+          env:
+            # MLflow, Postgres and MinIO still run in Docker Compose on the host.
+            - {name: MLFLOW_TRACKING_URI, value: "http://host.minikube.internal:5001"}
+            - {name: MODEL_URI, value: "models:/churn-model@champion"}
+            - {name: MODEL_POLL_SECONDS, value: "30"}
+            - name: ADMIN_KEY
+              valueFrom:
+                secretKeyRef: {name: churn-secrets, key: ADMIN_KEY, optional: true}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 768Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: churn
+spec:
+  selector: {app: api, track: stable}
+  ports:
+    - {name: http, port: 8000, targetPort: http}
+---
+# Same stable pods under another name. ingress-nginx splits canary traffic per Service (upstream), so admin
+# requests (approve, rollback) use this Service to stay out of the split.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-admin
+  namespace: churn
+spec:
+  selector: {app: api, track: stable}
+  ports:
+    - {name: http, port: 8000, targetPort: http}

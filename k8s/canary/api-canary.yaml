@@ -1,0 +1,74 @@
+# Canary API: pinned to one registry version (change MODEL_URI), receives a share of /api traffic.
+# Apply with: kubectl apply -k k8s/canary      Remove with: kubectl delete -k k8s/canary
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-canary
+  namespace: churn
+  labels: {app: api, track: canary}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: api, track: canary}
+  template:
+    metadata:
+      labels: {app: api, track: canary}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
+    spec:
+      containers:
+        - name: api
+          image: churn-api:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8000}
+          env:
+            - {name: MLFLOW_TRACKING_URI, value: "http://host.minikube.internal:5001"}
+            # A version URI pins this instance: it never follows the alias and refuses approve/rollback.
+            - {name: MODEL_URI, value: "models:/churn-model/2"}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 768Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-canary
+  namespace: churn
+spec:
+  selector: {app: api, track: canary}
+  ports:
+    - {name: http, port: 8000, targetPort: http}
+---
+# Same path as the stable API Ingress; ingress-nginx sends `canary-weight` percent of requests here.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-canary
+  namespace: churn
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-weight: "20"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service: {name: api-canary, port: {name: http}}

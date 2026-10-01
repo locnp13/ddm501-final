@@ -1,6 +1,6 @@
 # Quay về bản cũ, canary và A/B testing
 
-Tài liệu này mô tả cách hệ thống hiện tại hỗ trợ quay về phiên bản cũ, và cách mở rộng lên Kubernetes để triển khai canary hoặc A/B. **Phần Kubernetes mới là thiết kế: chưa có manifest và chưa chạy thử trên cụm nào.**
+Tài liệu này mô tả cách hệ thống hiện tại hỗ trợ quay về phiên bản cũ, và cách triển khai canary hoặc A/B trên Kubernetes. Manifest cho minikube nằm trong `k8s/` (xem `k8s/README.md`): **canary đã chạy thử trên minikube**; **A/B chưa làm**, chỉ là thiết kế.
 
 ## 1. Hiện tại (Docker Compose)
 
@@ -24,10 +24,11 @@ Lưu ý khi khôi phục: v1 được huấn luyện **trước khi có bước 
 | **Theo dõi alias** | `MODEL_POLL_SECONDS=30` (mặc định 0 = tắt) | Nhiều bản sao cùng hội tụ về `champion` sau một lần duyệt hoặc khôi phục. Bản sao nhận lệnh đổi ngay, các bản còn lại đổi trong tối đa 30 giây |
 | **Nhận diện phiên bản** | `model_version` trong phản hồi; nhãn `model_version` trên `churn_predictions_total` và `churn_probability`; gauge `churn_model_info{version}` | Gán mỗi dự đoán và mỗi số liệu cho đúng phiên bản |
 
-## 3. Canary (thiết kế)
+## 3. Canary (đã chạy thử trên minikube)
 
 Mục tiêu: kiểm tra phiên bản mới chạy ổn định với một phần nhỏ lưu lượng trước khi chuyển hẳn.
 
+- Đã kiểm tra bằng `k8s/canary/`: trọng số 20% cho 21,5% yêu cầu vào canary. Lưu ý: ingress-nginx chia canary **theo Service**, nên lệnh duyệt/khôi phục phải đi qua Service riêng (`api-admin`) để không rơi vào bản ghim (xem `k8s/README.md`).
 - Hai Deployment dùng cùng image API: `churn-api-stable` ghim phiên bản hiện tại (ví dụ `models:/churn-model/3`) và `churn-api-canary` ghim phiên bản mới (`models:/churn-model/4`).
 - Chia lưu lượng ở tầng Ingress hoặc service mesh (ingress-nginx với annotation canary-weight, Argo Rollouts hoặc Istio VirtualService), ví dụ 5% rồi 25% rồi 100%.
 - So sánh hai phiên bản trên Grafana, ví dụ:
@@ -47,7 +48,9 @@ A/B khác canary ở mục tiêu: **đo xem phiên bản nào mang lại kết q
 
 ## 5. Chưa làm
 
-- Manifest Kubernetes (Deployment, Service, Ingress, cấu hình canary) và việc chạy thử trên cụm thật.
+- **Tự động deploy lên K8s khi push code.** CI hiện chỉ build và đẩy image lên GHCR (nhánh `main`); cụm local dùng image build tay (`churn-api:dev`). Chưa có job nào cập nhật cụm.
+- **Đưa model vào canary tự động.** Duyệt model chỉ đổi alias `champion` cho nhóm stable; canary là việc triển khai tay (`kubectl apply -k k8s/canary`, ghim phiên bản cụ thể). Chưa có luồng "challenger vào canary, đạt tiêu chí thì duyệt".
+- Postgres, MinIO, MLflow chưa chạy trong cụm (vẫn ở Docker Compose).
 - Mã khách hàng trong request và việc lưu nhật ký dự đoán (cần cho A/B).
 - Cách lưu `ADMIN_KEY` an toàn trên K8s (Secret) và bảo vệ các endpoint duyệt khi có nhiều bản sao (hiện chỉ có khóa dùng chung).
 - Dashboard Grafana so sánh phiên bản (các truy vấn ở mục 3 mới là gợi ý).
