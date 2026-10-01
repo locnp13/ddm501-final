@@ -104,3 +104,45 @@ groups:
         annotations:
           summary: "The served model changed"
           description: "An approval, rollback or registry sync switched the model in the last 10 minutes (see the model dashboard)."
+
+  # Input drift: the live share of every feature bucket against its share in the training data, as PSI
+  # (population stability index). Below 0.1 is stable, 0.1 to 0.2 a moderate shift, above 0.2 significant.
+  # The API exports the live counts (churn_feature_values_total) and the training shares
+  # (churn_feature_baseline_share); empty buckets are floored at 0.0001 so the logarithm stays finite.
+  - name: churn-drift
+    rules:
+      - record: churn:feature_share:1h
+        expr: |
+          clamp_min(
+            (
+              sum by (model_version, feature, bucket)(increase(churn_feature_values_total[1h]))
+              / on (model_version, feature) group_left
+              sum by (model_version, feature)(increase(churn_feature_values_total[1h]))
+            )
+            or max by (model_version, feature, bucket)(churn_feature_baseline_share) * 0,
+            0.0001
+          )
+
+      # Needs more than 100 predictions in the hour: PSI of a handful of requests is noise.
+      - record: churn:feature_psi:1h
+        expr: |
+          sum by (model_version, feature)(
+            (
+              churn:feature_share:1h
+              - clamp_min(max by (model_version, feature, bucket)(churn_feature_baseline_share), 0.0001)
+            )
+            * ln(
+              churn:feature_share:1h
+              / clamp_min(max by (model_version, feature, bucket)(churn_feature_baseline_share), 0.0001)
+            )
+          )
+          and on (model_version)
+          (sum by (model_version)(increase(churn_probability_count[1h])) > 100)
+
+      - alert: FeatureDrift
+        expr: churn:feature_psi:1h > 0.2
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Input {{ $labels.feature }} drifted from the training data (model v{{ $labels.model_version }})"
+          description: 'PSI of {{ $labels.feature }} is {{ $value | printf "%.2f" }} over the last hour; above 0.2 is a significant shift from the data the model learned on.'

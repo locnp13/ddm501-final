@@ -24,6 +24,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
+from src.training.baseline import BASELINE_FILE, build_baseline
 from src.training.business import best_row, profit_curve, selection_gap
 from src.training.data import PROCESSED_PATH, load_params
 from src.training.features import FeatureEngineer
@@ -229,6 +230,8 @@ def run_training(df: pd.DataFrame, params: dict) -> dict:
         mlflow.log_params({f"train.{k}": v for k, v in train_p.items()})
         mlflow.log_params({f"economics.{k}": v for k, v in econ.items() if k != "k_grid"})
         mlflow.log_param("scale_pos_weight", round(spw, 3))
+        # Training distribution of every input; the API compares live requests with it (drift monitoring).
+        mlflow.log_dict(build_baseline(X_tr), BASELINE_FILE)
 
         # Model, feature and sensitive-column choices are made on CV only; the test set is used once below.
         results = compare_configs(X_tr, y_tr, train_p, spw)

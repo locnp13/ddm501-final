@@ -139,7 +139,7 @@ Chạy trong cụm Kubernetes, cấu hình trong [`k8s/monitoring/`](k8s/monitor
 | alert-hub | Nhận webhook, giữ danh sách cảnh báo, phục vụ tab **Cảnh báo** của giao diện (có chấm đỏ) | tab Cảnh báo |
 | Grafana | 3 dashboard: **Churn: API**, **Churn: Mô hình**, **Churn: So sánh phiên bản** | `/grafana/` |
 
-Số liệu của API: `churn_requests_total`, `churn_request_latency_seconds` (cả hai có nhãn `model_version`), `churn_predictions_total`, `churn_probability`, `churn_model_info`, `churn_model_loaded`, `churn_model_changes_total`, `churn_unknown_category_total`, cùng số liệu tiến trình (`process_cpu_seconds_total`, `process_resident_memory_bytes`).
+Số liệu của API: `churn_requests_total`, `churn_request_latency_seconds` (cả hai có nhãn `model_version`), `churn_predictions_total`, `churn_probability`, `churn_model_info`, `churn_model_loaded`, `churn_model_changes_total`, `churn_unknown_category_total`, `churn_feature_values_total` và `churn_feature_baseline_share` (drift đầu vào, xem bên dưới), cùng số liệu tiến trình (`process_cpu_seconds_total`, `process_resident_memory_bytes`).
 
 Luật cảnh báo (`k8s/monitoring/prometheus/alerts.yml`, được kiểm thử bằng `promtool test rules` trong CI). Ngưỡng là điểm khởi đầu của dự án, chưa đo từ dữ liệu thật:
 
@@ -155,9 +155,12 @@ Luật cảnh báo (`k8s/monitoring/prometheus/alerts.yml`, được kiểm th�
 | `HighMemory` | RAM pod > 600 MiB (giới hạn 768 MiB), 5 phút | warning |
 | `UnknownCategorySpike` | Giá trị phân loại chưa từng thấy > 5% số dự đoán trong 15 phút | warning |
 | `PredictionDrift` | Xác suất trung bình 1 giờ lệch quá 0,10 so với 0,27 (tỷ lệ churn huấn luyện), kéo dài 30 phút, từ 50 dự đoán trở lên | warning |
+| `FeatureDrift` | PSI của một feature so với dữ liệu huấn luyện > 0,2 trong 1 giờ, kéo dài 30 phút (cần trên 100 dự đoán) | warning |
 | `ModelChanged` | Model vừa được duyệt, khôi phục hoặc đồng bộ (10 phút) | info |
 
-Giám sát không đo được độ chính xác thật của model vì nhãn churn đến muộn; `PredictionDrift` và `UnknownCategorySpike` chỉ báo hiệu dữ liệu hoặc dự đoán đã đổi.
+**Drift theo từng feature (PSI).** Khi huấn luyện, phân phối của từng đầu vào (19 feature, số liệu liên tục chia theo thập phân vị) được lưu cùng model (`feature_baseline.json`). API đếm mỗi yêu cầu vào đúng các nhóm đó và Prometheus tính PSI so với lúc huấn luyện: dưới 0,1 ổn định, 0,1 đến 0,2 lệch vừa, trên 0,2 lệch đáng kể. Chỉ có **số đếm theo nhóm**, không lưu giá trị của khách hàng nào. Model huấn luyện trước tính năng này cần bổ sung thống kê: `docker compose run --rm trainer python -m src.training.baseline` (mặc định cho champion; từ chối nếu dữ liệu đã đổi). Panel PSI nằm trong dashboard *Churn: Mô hình*.
+
+Giám sát không đo được độ chính xác thật của model vì nhãn churn đến muộn; `PredictionDrift`, `UnknownCategorySpike` và `FeatureDrift` chỉ báo hiệu dữ liệu hoặc dự đoán đã đổi.
 
 ## Kiểm thử và CI
 

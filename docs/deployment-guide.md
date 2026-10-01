@@ -108,6 +108,7 @@ pod API --/metrics--> Prometheus --luật--> Alertmanager --webhook--> alert-hub
 - Prometheus tìm pod nhờ annotation `prometheus.io/*` và quét **từng pod** (không qua Service), nên bộ đếm của hai bản sao không bị trộn. Pod canary (`track=canary`) cũng được quét.
 - Cảnh báo về tới giao diện bằng **webhook**: trang giao diện là tệp tĩnh nên không tự nhận webhook, vì vậy alert-hub nhận và giao diện hỏi lại định kỳ. Chấm đỏ trên tab cho biết số cảnh báo đang bắn.
 - Hub chỉ nhớ danh sách trong bộ nhớ: sau khi khởi động lại nó đọc lại các cảnh báo **đang bắn** từ Alertmanager, nhưng **nhật ký sự kiện đã xử lý bị mất**.
+- **Drift theo feature**: huấn luyện lưu `feature_baseline.json` (phân phối từng đầu vào) vào run MLflow; khi nạp model, API xuất `churn_feature_baseline_share` và tạo sẵn các bộ đếm `churn_feature_values_total{model_version,feature,bucket}` ở mức 0; Prometheus tính `churn:feature_psi:1h` và cảnh báo `FeatureDrift` khi PSI > 0,2 kéo dài 30 phút. Không có dữ liệu khách hàng nào được lưu, chỉ số đếm theo nhóm.
 - Ngưỡng và ý nghĩa từng luật: bảng trong `README.md`, mục Giám sát. Mỗi luật có test với dữ liệu giả (`k8s/monitoring/prometheus/alerts_test.yml`).
 
 ## 3. Chạy lần đầu
@@ -194,7 +195,8 @@ Cấu hình qua biến môi trường của API: `MODEL_URI` (mặc định `mod
 | Dashboard Grafana trống | Chưa có lưu lượng (nhiều số liệu là tỷ lệ theo thời gian), hoặc Prometheus không quét được pod | Gửi vài yêu cầu dự đoán; mở `/prometheus/targets` xem `churn-api` có `up` |
 | Không đăng nhập được Grafana | Dùng sai mật khẩu | Tài khoản `admin`, mật khẩu là `GRAFANA_ADMIN_PASSWORD` trong Secret `churn-secrets` (đổi trong `.env` thì tạo lại Secret và `rollout restart deploy/grafana`) |
 | Cảnh báo đã bắn trên Prometheus mà tab Cảnh báo trống | alert-hub chưa nhận được webhook | Xem `/alertmanager/` (nhóm có gửi không) và `kubectl -n churn logs deploy/alert-hub`; hub tự đọc lại cảnh báo đang bắn từ Alertmanager khi khởi động |
-| Cảnh báo `PredictionDrift` bất ngờ | Có lưu lượng bị lệch (ví dụ thử nghiệm lặp lại một khách) | Đúng thiết kế: tự hết khi dữ liệu lệch quá 1 giờ |
+| Cảnh báo `PredictionDrift` hoặc `FeatureDrift` bất ngờ | Có lưu lượng bị lệch (ví dụ thử nghiệm lặp lại một kiểu khách) | Đúng thiết kế: tự hết khi dữ liệu lệch quá 1 giờ |
+| Panel PSI trống | Dưới 100 dự đoán trong 1 giờ, hoặc model đang chạy chưa có `feature_baseline.json` | Gửi thêm yêu cầu; với model cũ chạy `python -m src.training.baseline` (xem README, mục Giám sát) rồi khởi động lại API |
 
 ## 7. Chưa làm hoặc chưa kiểm chứng
 
@@ -211,7 +213,7 @@ Về giám sát cụ thể:
 
 - **Cảnh báo chỉ vào tab Cảnh báo của giao diện.** Chưa có kênh gửi ra ngoài (Slack, Telegram, email); thêm một receiver vào `k8s/monitoring/alertmanager/alertmanager.yml` là đủ.
 - **Ngưỡng cảnh báo là điểm khởi đầu chưa đo từ dữ liệu thật**; nền 0,27 của `PredictionDrift` được ghi cứng trong luật.
-- **Drift chỉ dựa trên xác suất trung bình và category lạ**, chưa có PSI theo từng feature và chưa lưu nhật ký dự đoán.
+- **Drift theo feature dùng PSI trên cửa sổ 1 giờ**: ít yêu cầu thì PSI nhiễu (cỡ (số nhóm − 1) / số yêu cầu, khoảng 0,04 với 240 yêu cầu), nên chỉ tính khi có trên 100 dự đoán. Model huấn luyện trước tính năng này không được giám sát cho tới khi bổ sung thống kê. Chưa lưu nhật ký dự đoán (vì vậy chưa đo được độ chính xác thật hay chạy A/B).
 - **Dashboard Grafana mới được kiểm tra bằng truy vấn** (31 trong 33 biểu thức có dữ liệu, 0 lỗi; 2 biểu thức lỗi 5xx đã được sửa để hiện 0), tôi chưa xem giao diện Grafana bằng mắt. Dashboard "So sánh phiên bản" chưa được chạy với hai phiên bản thật.
 - **Hạ tầng không được giám sát**: MLflow, MinIO, Postgres và tài nguyên của node chưa có số liệu hay cảnh báo.
 - **Dữ liệu giám sát nằm trên máy này**: Prometheus (PVC minikube, 7 ngày) mất nếu xóa cụm; Alertmanager và Grafana dùng `emptyDir`.

@@ -16,7 +16,7 @@
   },
   "panels": [
     {
-      "id": 19,
+      "id": 21,
       "type": "timeseries",
       "title": "Số pod theo phiên bản",
       "description": "",
@@ -67,7 +67,7 @@
       }
     },
     {
-      "id": 20,
+      "id": 22,
       "type": "timeseries",
       "title": "Yêu cầu / giây theo phiên bản",
       "description": "",
@@ -118,7 +118,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 23,
       "type": "timeseries",
       "title": "Lỗi 5xx theo phiên bản",
       "description": "",
@@ -169,7 +169,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 24,
       "type": "timeseries",
       "title": "p95 độ trễ theo phiên bản",
       "description": "",
@@ -220,7 +220,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 25,
       "type": "timeseries",
       "title": "Xác suất trung bình theo phiên bản",
       "description": "Hai phiên bản nhận cùng loại khách thì trung bình phải gần nhau; chênh nhiều nghĩa là hai mô hình chấm khác nhau.",
@@ -271,7 +271,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 26,
       "type": "timeseries",
       "title": "Tỷ lệ dự đoán churn theo phiên bản",
       "description": "",
@@ -322,7 +322,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 27,
       "type": "timeseries",
       "title": "Dự đoán / giây theo phiên bản",
       "description": "",

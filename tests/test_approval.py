@@ -33,7 +33,7 @@ def pending(tmp_path_factory):
 def client(pending, monkeypatch):
     monkeypatch.setattr(app_module, "MODEL_URI", f"models:/{MODEL_NAME}@{CHAMPION}")
     monkeypatch.setattr(app_module, "ADMIN_KEY", KEY)
-    app_module.state.update({"model": None, "info": None, "figures": {}})
+    app_module.state.update({"model": None, "info": None, "figures": {}, "profile": None})
     with TestClient(app_module.app) as c:
         yield c
 
@@ -142,7 +142,7 @@ def test_replicas_follow_the_registry_alias(client, pending) -> None:
 def test_pinned_instance_serves_one_version_and_cannot_change_it(pending, monkeypatch) -> None:
     monkeypatch.setattr(app_module, "MODEL_URI", f"models:/{MODEL_NAME}/1")
     monkeypatch.setattr(app_module, "ADMIN_KEY", KEY)
-    app_module.state.update({"model": None, "info": None, "figures": {}})
+    app_module.state.update({"model": None, "info": None, "figures": {}, "profile": None})
     with TestClient(app_module.app) as c:
         info = c.get("/v1/model").json()
         assert info["version"] == "1" and info["alias"] is None

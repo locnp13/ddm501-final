@@ -150,3 +150,110 @@ tests:
       - eval_time: 30m
         alertname: ModelChanged
         exp_alerts: []
+
+  - name: input drift - a shifted Contract mix gives a high PSI and fires FeatureDrift
+    interval: 1m
+    input_series:
+      # the training shares published by the API (empty "other" bucket floored at 0.0001)
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="Month-to-month"}'
+        values: '0.55x150'
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="One year"}'
+        values: '0.21x150'
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="Two year"}'
+        values: '0.24x150'
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="other"}'
+        values: '0.0001x150'
+      # live traffic: 85% month-to-month instead of 55%
+      - series: 'churn_feature_values_total{model_version="3",feature="Contract",bucket="Month-to-month"}'
+        values: '0+85x150'
+      - series: 'churn_feature_values_total{model_version="3",feature="Contract",bucket="One year"}'
+        values: '0+10x150'
+      - series: 'churn_feature_values_total{model_version="3",feature="Contract",bucket="Two year"}'
+        values: '0+5x150'
+      - series: 'churn_probability_count{model_version="3"}'
+        values: '0+100x150'
+    promql_expr_test:
+      - expr: churn:feature_psi:1h
+        eval_time: 100m
+        exp_samples:
+          - labels: 'churn:feature_psi:1h{model_version="3",feature="Contract"}'
+            value: 0.5102455537012157
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: FeatureDrift
+        exp_alerts:
+          - exp_labels: {severity: warning, model_version: "3", feature: Contract}
+            exp_annotations:
+              summary: "Input Contract drifted from the training data (model v3)"
+              description: "PSI of Contract is 0.51 over the last hour; above 0.2 is a significant shift from the data the model learned on."
+
+  - name: input drift - the training mix gives a PSI near zero and no alert
+    interval: 1m
+    input_series:
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="Month-to-month"}'
+        values: '0.55x150'
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="One year"}'
+        values: '0.21x150'
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="Two year"}'
+        values: '0.24x150'
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="other"}'
+        values: '0.0001x150'
+      - series: 'churn_feature_values_total{model_version="3",feature="Contract",bucket="Month-to-month"}'
+        values: '0+55x150'
+      - series: 'churn_feature_values_total{model_version="3",feature="Contract",bucket="One year"}'
+        values: '0+21x150'
+      - series: 'churn_feature_values_total{model_version="3",feature="Contract",bucket="Two year"}'
+        values: '0+24x150'
+      - series: 'churn_probability_count{model_version="3"}'
+        values: '0+100x150'
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: FeatureDrift
+        exp_alerts: []
+
+  - name: input drift - too little traffic gives no PSI, however skewed
+    interval: 1m
+    input_series:
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="Month-to-month"}'
+        values: '0.55x150'
+      - series: 'churn_feature_baseline_share{model_version="3",feature="Contract",bucket="One year"}'
+        values: '0.45x150'
+      - series: 'churn_feature_values_total{model_version="3",feature="Contract",bucket="One year"}'
+        values: '0+1x150'
+      - series: 'churn_probability_count{model_version="3"}'
+        values: '0+1x150'
+    promql_expr_test:
+      - expr: churn:feature_psi:1h
+        eval_time: 100m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: FeatureDrift
+        exp_alerts: []
+
+  - name: input drift - an unseen category in a quarter of requests is caught through the other bucket
+    interval: 1m
+    input_series:
+      - series: 'churn_feature_baseline_share{model_version="3",feature="PaymentMethod",bucket="Electronic check"}'
+        values: '0.6x150'
+      - series: 'churn_feature_baseline_share{model_version="3",feature="PaymentMethod",bucket="Mailed check"}'
+        values: '0.4x150'
+      - series: 'churn_feature_baseline_share{model_version="3",feature="PaymentMethod",bucket="other"}'
+        values: '0.0001x150'
+      - series: 'churn_feature_values_total{model_version="3",feature="PaymentMethod",bucket="Electronic check"}'
+        values: '0+45x150'
+      - series: 'churn_feature_values_total{model_version="3",feature="PaymentMethod",bucket="Mailed check"}'
+        values: '0+30x150'
+      - series: 'churn_feature_values_total{model_version="3",feature="PaymentMethod",bucket="other"}'
+        values: '0+25x150'
+      - series: 'churn_probability_count{model_version="3"}'
+        values: '0+100x150'
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: FeatureDrift
+        exp_alerts:
+          - exp_labels: {severity: warning, model_version: "3", feature: PaymentMethod}
+            exp_annotations:
+              summary: "Input PaymentMethod drifted from the training data (model v3)"
+              description: "PSI of PaymentMethod is 2.03 over the last hour; above 0.2 is a significant shift from the data the model learned on."
+

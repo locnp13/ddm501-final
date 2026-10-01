@@ -16,6 +16,7 @@ from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
+from src.serving.drift import FEATURE_BASELINE, load_profile
 from src.serving.model_info import FIGURES, list_versions, load_figure, load_model_info, parse_model_uri
 from src.serving.schemas import EXAMPLE, CustomerFeatures, PredictResponse, VersionRequest, unknown_categories
 from src.training.registry import CHALLENGER, CHAMPION, MODEL_NAME
@@ -42,7 +43,7 @@ UNKNOWN_CATEGORY = Counter(
     "churn_unknown_category_total", "Requests with a category never seen in training", ["field"]
 )
 
-state: dict[str, Any] = {"model": None, "info": None, "figures": {}}
+state: dict[str, Any] = {"model": None, "info": None, "figures": {}, "profile": None}
 promote_lock = threading.Lock()
 
 
@@ -58,11 +59,15 @@ def is_pinned() -> bool:
 
 def set_served(model: Any, info: dict[str, Any] | None) -> None:
     """Make `model` the one answering requests and refresh the gauges that describe it."""
-    state.update(model=model, info=info, figures={})
+    profile = load_profile(info)
+    state.update(model=model, info=info, figures={}, profile=profile)
     MODEL_LOADED.set(1 if model is not None else 0)
     MODEL_INFO.clear()
+    FEATURE_BASELINE.clear()
     if info is not None:
         MODEL_INFO.labels(info["version"]).set(1)
+    if profile is not None:
+        profile.publish_baseline()
 
 
 def served_version() -> str:
@@ -173,6 +178,11 @@ def predict(features: CustomerFeatures) -> PredictResponse:
         unknown = unknown_categories(features)
         for field, _ in unknown:
             UNKNOWN_CATEGORY.labels(field).inc()
+        if state["profile"] is not None:
+            try:
+                state["profile"].observe(features.model_dump())
+            except Exception as exc:  # monitoring must never break a prediction
+                logger.warning("Could not record feature drift metrics: %s", exc)
         PREDICTIONS.labels("churn" if prob >= 0.5 else "stay", version).inc()
         CHURN_PROBABILITY.labels(version).observe(prob)
         REQUESTS.labels("predict", "200", version).inc()

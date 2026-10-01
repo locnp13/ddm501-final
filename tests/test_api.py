@@ -29,7 +29,7 @@ def champion_dir(tmp_path_factory):
 @pytest.fixture
 def client(champion_dir, monkeypatch):
     monkeypatch.setattr(app_module, "MODEL_URI", "models:/churn-model@champion")
-    app_module.state.update({"model": None, "info": None, "figures": {}})
+    app_module.state.update({"model": None, "info": None, "figures": {}, "profile": None})
     with TestClient(app_module.app) as c:
         yield c
 
@@ -164,11 +164,52 @@ def test_api_schema_matches_training_schema() -> None:
         assert set(SCHEMA.columns[name].checks[0].statistics["allowed_values"]) == set(known), name
 
 
+def test_feature_buckets_are_counted_with_the_training_baseline(client) -> None:
+    other = 'churn_feature_values_total{bucket="other",feature="PaymentMethod",model_version="1"}'
+
+    def count(metrics: str, series: str) -> float:  # the registry is shared by all tests, so compare increments
+        return next((float(line.split()[-1]) for line in metrics.splitlines() if line.startswith(series)), 0.0)
+
+    before = count(client.get("/metrics").text, other)
+    client.post("/v1/predict", json=features(Contract="Month-to-month", tenure=3))
+    client.post("/v1/predict", json=features(PaymentMethod="Momo"))  # unseen: counted as "other"
+    metrics = client.get("/metrics").text
+    assert 'churn_feature_values_total{bucket="Month-to-month",feature="Contract",model_version="1"}' in metrics
+    assert count(metrics, other) == before + 1
+    assert 'churn_feature_baseline_share{bucket="Month-to-month",feature="Contract",model_version="1"}' in metrics
+    assert 'feature="tenure"' in metrics and 'bucket="00_<' in metrics  # numeric inputs use quantile buckets
+
+
+def test_every_bucket_counter_exists_at_zero_before_any_traffic(client) -> None:
+    """Without this, Prometheus increase() misses a burst that arrives before a new series is first scraped."""
+    metrics = client.get("/metrics").text
+    lines = metrics.splitlines()
+    zeros = [x for x in lines if x.startswith("churn_feature_values_total{") and x.endswith(" 0.0")]
+    baseline = [x for x in lines if x.startswith("churn_feature_baseline_share{")]
+    assert len(baseline) > 30 and zeros, "the counters must be created when the model is loaded"
+    assert 'churn_feature_values_total{bucket="other",feature="Contract",model_version="1"}' in metrics
+
+
+def test_no_customer_values_leak_into_the_metrics(client) -> None:
+    client.post("/v1/predict", json=features(MonthlyCharges=77.123456, tenure=7))
+    assert "77.123456" not in client.get("/metrics").text  # only bucket labels, never raw numbers
+
+
+def test_a_model_without_a_baseline_still_predicts_and_exports_no_drift_metrics(client, monkeypatch) -> None:
+    from src.serving import drift
+
+    monkeypatch.setattr(drift.mlflow.artifacts, "load_dict", lambda uri: (_ for _ in ()).throw(OSError("missing")))
+    app_module.set_served(app_module.state["model"], app_module.state["info"])
+    assert client.post("/v1/predict", json=features()).status_code == 200
+    assert "churn_feature_baseline_share{" not in client.get("/metrics").text
+
+
+# Must stay last: it points MLflow at an empty store, which the tests above must not see.
 def test_no_model_gives_503(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/empty.db")
     monkeypatch.setattr(app_module, "MODEL_URI", "models:/churn-model@champion")
-    app_module.state.update({"model": None, "info": None, "figures": {}})
+    app_module.state.update({"model": None, "info": None, "figures": {}, "profile": None})
     with TestClient(app_module.app) as c:
         assert c.get("/health").json()["model_loaded"] is False
         assert c.get("/ready").status_code == 503  # alive, but not ready for traffic
