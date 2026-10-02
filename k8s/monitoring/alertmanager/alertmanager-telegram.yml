@@ -1,0 +1,36 @@
+# Used instead of alertmanager.yml when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are in the churn-secrets
+# Secret. The init container in alertmanager.yaml fills in __TELEGRAM_CHAT_ID__ and writes the token file.
+# Keep the rest identical to alertmanager.yml (same route settings and inhibit rules).
+route:
+  receiver: alert-hub
+  group_by: [alertname]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+  # An alert only goes to the receiver of the first matching child, so there is one child per receiver
+  # and the first one uses continue.
+  routes:
+    - receiver: telegram
+      continue: true
+    - receiver: alert-hub
+
+receivers:
+  - name: alert-hub
+    webhook_configs:
+      - url: http://alert-hub:8080/webhook
+        send_resolved: true
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /etc/alertmanager/telegram-token
+        chat_id: __TELEGRAM_CHAT_ID__
+        parse_mode: ""  # plain text: alert texts may contain characters that break HTML mode
+        send_resolved: true
+        message: |-
+          {{ range .Alerts }}{{ if eq .Status "firing" }}[{{ .Labels.severity | toUpper }}]{{ else }}[RESOLVED]{{ end }} {{ .Labels.alertname }}
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
+
+inhibit_rules:
+  - source_matchers: ['alertname="ApiNoTargets"']
+    target_matchers: ['alertname=~"ApiDown|ReplicaLost|ModelNotLoaded|HighMemory"']

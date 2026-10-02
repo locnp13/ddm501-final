@@ -15,6 +15,44 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
+      initContainers:
+        # Picks the config: with Telegram credentials in churn-secrets, the Telegram variant; without, hub only.
+        # Secret changes need `kubectl -n churn rollout restart deploy/alertmanager`.
+        - name: render-config
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+                case "$TELEGRAM_CHAT_ID" in
+                  ''|*[!0-9-]*) echo "TELEGRAM_CHAT_ID must be an integer (negative for groups)"; exit 1 ;;
+                esac
+                printf %s "$TELEGRAM_BOT_TOKEN" > /out/telegram-token
+                chmod 600 /out/telegram-token
+                sed "s/__TELEGRAM_CHAT_ID__/$TELEGRAM_CHAT_ID/" /config/alertmanager-telegram.yml > /out/alertmanager.yml
+                echo "Telegram notifications enabled"
+              else
+                cp /config/alertmanager.yml /out/alertmanager.yml
+                echo "Telegram not configured: alerts go to the alert hub only"
+              fi
+          env:
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef: {name: churn-secrets, key: TELEGRAM_BOT_TOKEN, optional: true}
+            - name: TELEGRAM_CHAT_ID
+              valueFrom:
+                secretKeyRef: {name: churn-secrets, key: TELEGRAM_CHAT_ID, optional: true}
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {memory: 32Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: rendered, mountPath: /out}
       containers:
         - name: alertmanager
           image: prom/alertmanager:v0.27.0
@@ -39,11 +77,13 @@ spec:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
           volumeMounts:
-            - {name: config, mountPath: /etc/alertmanager}
+            - {name: rendered, mountPath: /etc/alertmanager}
             - {name: data, mountPath: /alertmanager}
       volumes:
         - name: config
           configMap: {name: alertmanager-config}
+        - name: rendered
+          emptyDir: {}
         - name: data
           emptyDir: {}  # silences and notification state are lost on restart
 ---

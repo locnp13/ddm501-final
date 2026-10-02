@@ -17,7 +17,7 @@ docker build -t churn-frontend:dev -f frontend/Dockerfile frontend
 
 # Khóa quản trị lấy từ .env (không có trong manifest), rồi triển khai
 kubectl apply -f k8s/base/namespace.yaml
-kubectl -n churn create secret generic churn-secrets --from-env-file=.env   # cần ADMIN_KEY và GRAFANA_ADMIN_PASSWORD
+kubectl -n churn create secret generic churn-secrets --from-env-file=.env   # cần ADMIN_KEY và GRAFANA_ADMIN_PASSWORD; TELEGRAM_BOT_TOKEN và TELEGRAM_CHAT_ID là tùy chọn
 kubectl apply -k k8s/base
 kubectl apply -k k8s/monitoring    # Prometheus, Alertmanager, Grafana, alert-hub
 kubectl -n churn rollout status deploy/api

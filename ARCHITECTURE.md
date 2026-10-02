@@ -70,7 +70,7 @@ CI/CD (không vẽ ở trên): `ci.yml` chạy lint, test, build trên mỗi pus
 | API | `src/serving/app.py`, `schemas.py` | `/v1/predict`, `/v1/model*`, duyệt và khôi phục, `/health`, `/ready`, `/metrics` | Không huấn luyện, không lưu dữ liệu khách hàng |
 | Giám sát drift | `src/serving/drift.py` | Đếm giá trị đầu vào theo bucket vào bộ đếm Prometheus | Không lưu giá trị thô |
 | Frontend | `frontend/` | UI tĩnh: Dự đoán, Lịch sử, Mô hình, Cảnh báo, Tài liệu; proxy `/api` | Không giữ trạng thái |
-| Alert hub | `src/alerts/hub.py` | Nhận webhook Alertmanager, giữ danh sách cho tab Cảnh báo | Không gửi ra ngoài (Slack, email) |
+| Alert hub | `src/alerts/hub.py` | Nhận webhook Alertmanager, giữ danh sách cho tab Cảnh báo | Không gửi ra ngoài; Telegram do Alertmanager gửi trực tiếp (tùy chọn) |
 | Giám sát | `k8s/monitoring/` | Prometheus, Alertmanager, Grafana (3 dashboard), 11 luật cảnh báo có `promtool test` | Chưa giám sát MLflow, MinIO, Postgres |
 
 Ranh giới quan trọng: **mã phục vụ không được import `src.training.data`** (image API không có Pandera, test kiểm tra điều này), và schema Pandera `SCHEMA` phải khớp `CustomerFeatures` của API (một test kiểm tra).
