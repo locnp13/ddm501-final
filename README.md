@@ -148,7 +148,7 @@ Chạy trong cụm Kubernetes, cấu hình trong [`k8s/monitoring/`](k8s/monitor
 | Thành phần | Vai trò | Truy cập |
 |---|---|---|
 | Prometheus | Quét **từng pod API** (đọc annotation `prometheus.io/*`), đánh giá luật cảnh báo, giữ dữ liệu 7 ngày | `/prometheus/` |
-| Alertmanager | Gom nhóm cảnh báo và gửi bằng webhook | `/alertmanager/` |
+| Alertmanager | Gom nhóm cảnh báo, gửi webhook tới alert-hub và (tùy chọn, nếu có `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID` trong `.env`) gửi Telegram; xem `docs/deployment-guide.md` | `/alertmanager/` |
 | alert-hub | Nhận webhook, giữ danh sách cảnh báo, phục vụ tab **Cảnh báo** của giao diện (có chấm đỏ) | tab Cảnh báo |
 | Grafana | 3 dashboard: **Churn: API**, **Churn: Mô hình**, **Churn: So sánh phiên bản** | `/grafana/` |
 
@@ -205,7 +205,7 @@ Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-
 
 Chưa hoàn thành (theo yêu cầu đề bài):
 
-- [ ] Kênh gửi cảnh báo ra ngoài (Slack, email): hiện cảnh báo chỉ vào tab Cảnh báo của giao diện
+- [ ] Kênh gửi cảnh báo ra ngoài: đã có Telegram (tùy chọn, xem mục Giám sát); chưa có Slack hay email
 - [ ] Drift theo từng feature (PSI) và nhật ký dự đoán
 - [ ] Endpoint `/v1/predict/batch` (schema chặt và ví dụ OpenAPI đã có cho `/v1/predict`)
 - [ ] Giải thích mô hình (SHAP, LIME)

@@ -180,6 +180,22 @@ Lý do có bước kiểm tra runner: job gửi tới runner đang offline sẽ 
 
 Cấu hình qua biến môi trường của API: `MODEL_URI` (mặc định `models:/churn-model@champion`; `models:/churn-model/3` để ghim một phiên bản), `MODEL_POLL_SECONDS` (theo dõi alias, K8s đặt 30), `ADMIN_KEY` (rỗng thì tắt duyệt/khôi phục), `ROOT_PATH` (`/api` khi đứng sau Ingress). Đổi `ADMIN_KEY` trong `.env` thì phải tạo lại Secret `churn-secrets` rồi `rollout restart deploy/api`.
 
+### Bật cảnh báo qua Telegram
+
+Alertmanager gửi thẳng tới Telegram bằng receiver có sẵn; không qua alert-hub, và tab Cảnh báo vẫn nhận như cũ.
+
+1. Tạo bot với `@BotFather`, lấy token. Nhắn một tin cho bot (hoặc thêm bot vào nhóm rồi nhắn trong nhóm), rồi mở `https://api.telegram.org/bot<TOKEN>/getUpdates` để lấy `chat.id` (số nguyên, nhóm thì âm).
+2. Điền `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID` vào `.env`.
+3. Tạo lại Secret và khởi động lại Alertmanager:
+
+```bash
+kubectl -n churn create secret generic churn-secrets --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n churn rollout restart deploy/alertmanager
+kubectl -n churn logs deploy/alertmanager -c render-config   # "Telegram notifications enabled"
+```
+
+Init container `render-config` chọn cấu hình lúc pod khởi động: có đủ hai khóa thì dùng `alertmanager-telegram.yml` (điền chat id, ghi token ra tệp), thiếu thì dùng `alertmanager.yml` chỉ gửi vào hub. Sau khi tạo lại Secret, nhớ khởi động lại `deploy/api` và `deploy/grafana` nếu bạn đã đổi `ADMIN_KEY` hoặc mật khẩu Grafana. Tin gửi dạng văn bản thuần: `[CRITICAL] tên cảnh báo`, tóm tắt, mô tả; khi hết cảnh báo có tin `[RESOLVED]`. Nhóm cảnh báo lặp lại sau 4 giờ nếu vẫn bắn (`repeat_interval`).
+
 ## 6. Xử lý sự cố
 
 | Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
@@ -211,7 +227,7 @@ Cấu hình qua biến môi trường của API: `MODEL_URI` (mặc định `mod
 
 Về giám sát cụ thể:
 
-- **Cảnh báo chỉ vào tab Cảnh báo của giao diện.** Chưa có kênh gửi ra ngoài (Slack, Telegram, email); thêm một receiver vào `k8s/monitoring/alertmanager/alertmanager.yml` là đủ.
+- **Cảnh báo luôn vào tab Cảnh báo; Telegram là tùy chọn** (mục 5, "Bật cảnh báo qua Telegram"). Chưa có Slack hay email; thêm một receiver vào `alertmanager-telegram.yml` (hoặc một tệp tương tự) là đủ.
 - **Ngưỡng cảnh báo là điểm khởi đầu chưa đo từ dữ liệu thật**; nền 0,27 của `PredictionDrift` được ghi cứng trong luật.
 - **Drift theo feature dùng PSI trên cửa sổ 1 giờ**: ít yêu cầu thì PSI nhiễu (cỡ (số nhóm − 1) / số yêu cầu, khoảng 0,04 với 240 yêu cầu), nên chỉ tính khi có trên 100 dự đoán. Model huấn luyện trước tính năng này không được giám sát cho tới khi bổ sung thống kê. Chưa lưu nhật ký dự đoán (vì vậy chưa đo được độ chính xác thật hay chạy A/B).
 - **Dashboard Grafana mới được kiểm tra bằng truy vấn** (31 trong 33 biểu thức có dữ liệu, 0 lỗi; 2 biểu thức lỗi 5xx đã được sửa để hiện 0), tôi chưa xem giao diện Grafana bằng mắt. Dashboard "So sánh phiên bản" chưa được chạy với hai phiên bản thật.
