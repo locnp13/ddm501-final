@@ -204,6 +204,10 @@ Xem bằng `kubectl -n churn logs deploy/api` (thêm `-f` để theo dõi), ho�
 
 Mã yêu cầu lấy từ header `X-Request-ID` nếu người gọi gửi (chỉ chấp nhận chữ, số, `.`, `_`, `-`, tối đa 64 ký tự), không thì API tự sinh; mã này có trong mọi dòng log của yêu cầu và trong header trả về, để lần theo một lần gọi.
 
+Ảnh chụp Grafana trên cụm thật (2026-10-03, sau khi gửi lưu lượng thử): [`docs/images/grafana-churn-log.jpg`](images/grafana-churn-log.jpg) (dashboard Churn: Log) và [`docs/images/grafana-churn-api.jpg`](images/grafana-churn-api.jpg) (dashboard Churn: API).
+
+![Dashboard Churn: Log](images/grafana-churn-log.jpg)
+
 **Đường đi của log.** Pod ghi log ra stdout → Alloy đọc qua Kubernetes API (một bản sao, quyền `pods/log` trong namespace `churn`) → Loki lưu (7 ngày, PVC) → Grafana truy vấn. Alloy gắn nhãn `namespace`, `app`, `pod`, `container`; với API nó tách thêm `level` (INFO, WARNING, ERROR) thành nhãn và `request_id` thành metadata (không làm nhãn vì có quá nhiều giá trị). Truy vấn mẫu trong Grafana, mục Explore, nguồn Loki:
 
 ```

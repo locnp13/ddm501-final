@@ -155,6 +155,8 @@ Chạy trong cụm Kubernetes, cấu hình trong [`k8s/monitoring/`](k8s/monitor
 | Alloy | Thu log của mọi pod trong namespace `churn` qua Kubernetes API, tách mức log và request id của API, đẩy sang Loki | nội bộ |
 | Grafana | 4 dashboard: **Churn: API**, **Churn: Mô hình**, **Churn: So sánh phiên bản**, **Churn: Log** | `/grafana/` |
 
+Ảnh chụp dashboard trên cụm thật: [Churn: API](docs/images/grafana-churn-api.jpg) và [Churn: Log](docs/images/grafana-churn-log.jpg).
+
 Số liệu của API: `churn_admin_actions_total` (duyệt, khôi phục theo kết quả), `churn_requests_total`, `churn_request_latency_seconds` (cả hai có nhãn `model_version`), `churn_predictions_total`, `churn_probability`, `churn_model_info`, `churn_model_loaded`, `churn_model_changes_total`, `churn_unknown_category_total`, `churn_feature_values_total` và `churn_feature_baseline_share` (drift đầu vào, xem bên dưới), cùng số liệu tiến trình (`process_cpu_seconds_total`, `process_resident_memory_bytes`).
 
 Luật cảnh báo (`k8s/monitoring/prometheus/alerts.yml`, được kiểm thử bằng `promtool test rules` trong CI). Ngưỡng là điểm khởi đầu của dự án, chưa đo từ dữ liệu thật:
@@ -208,13 +210,14 @@ Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-
 
 Chưa hoàn thành (theo yêu cầu đề bài):
 
-- [ ] Kênh gửi cảnh báo ra ngoài: đã có Telegram (tùy chọn, xem mục Giám sát); chưa có Slack hay email
-- [ ] Drift theo từng feature (PSI) và nhật ký dự đoán
 - [ ] Endpoint `/v1/predict/batch` (schema chặt và ví dụ OpenAPI đã có cho `/v1/predict`)
 - [ ] Giải thích mô hình (SHAP, LIME)
-- [ ] Phân tích fairness và giảm thiểu thiên lệch
-- [ ] Tài liệu privacy, ethics, hướng dẫn vận hành, so sánh lựa chọn công nghệ
-- [ ] Bước deploy trong CI
+- [ ] Giảm thiểu thiên lệch (fairness): đã đo chênh lệch tỷ lệ được chọn theo `gender` và `SeniorCitizen`, chưa có biện pháp giảm
+- [ ] Tài liệu privacy và ethics
+- [ ] Nhật ký dự đoán (để đo độ chính xác thật và chạy A/B); drift đầu vào theo PSI đã có
+- [ ] Deploy tự động trong CI: hiện là workflow bấm tay trên self-hosted runner
+- [ ] Kênh cảnh báo Slack hoặc email (Telegram đã có, tùy chọn)
+- [ ] Giám sát MLflow, MinIO, Postgres; thu log của các dịch vụ trong Compose; cảnh báo dựa trên log
 
 ## Xử lý sự cố
 

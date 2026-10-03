@@ -39,7 +39,7 @@
     },
     {
       "id": "serve",
-      "label": "Phục vụ (Docker Compose)"
+      "label": "Phục vụ (Kubernetes)"
     },
     {
       "id": "monitor",
@@ -96,7 +96,7 @@
       "col": 4,
       "type": "security",
       "label": "Quality gate",
-      "sublabel": "PR-AUC + fairness",
+      "sublabel": "PR-AUC + baseline",
       "tag": "chặn"
     },
     {
@@ -105,7 +105,7 @@
       "col": 5,
       "type": "database",
       "label": "Registry",
-      "sublabel": "Staging → Production"
+      "sublabel": "challenger → champion"
     },
     {
       "id": "api",
@@ -114,7 +114,7 @@
       "type": "backend",
       "label": "FastAPI",
       "sublabel": "/v1/predict, /health",
-      "tag": "Docker"
+      "tag": "K8s"
     },
     {
       "id": "client",
@@ -129,8 +129,8 @@
       "lane": "monitor",
       "col": 5,
       "type": "cloud",
-      "label": "Prometheus",
-      "sublabel": "scrape /metrics"
+      "label": "Prom · Loki",
+      "sublabel": "số liệu + log"
     },
     {
       "id": "grafana",
@@ -146,7 +146,7 @@
       "col": 3,
       "type": "messagebus",
       "label": "Huấn luyện lại",
-      "sublabel": "thủ công / workflow"
+      "sublabel": "thủ công (dvc repro)"
     }
   ],
   "edges": [
@@ -177,7 +177,7 @@
     {
       "from": "registry",
       "to": "api",
-      "label": "nạp Production",
+      "label": "nạp champion",
       "variant": "emphasis"
     },
     {
@@ -188,7 +188,7 @@
     {
       "from": "api",
       "to": "prom",
-      "label": "/metrics"
+      "label": "/metrics, log"
     },
     {
       "from": "prom",
