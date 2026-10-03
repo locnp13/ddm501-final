@@ -7,12 +7,12 @@ Hệ thống ML end-to-end dự đoán khách hàng có khả năng rời bỏ d
 
 ## Nhóm
 
-| Thành viên | Mã SV | Phụ trách |
+| Thành viên | Mã SV | Phụ trách (chi tiết trong [`CONTRIBUTING.md`](CONTRIBUTING.md)) |
 |------------|-------|-----------|
-| Nguyễn Thị Hồng Hạnh | 25MS13316 | _..._ |
-| Nguyễn Phúc Lộc | 25MS13314 | _..._ |
-| Phạm Văn Duy Khánh | 25MS13313 | _..._ |
-| Chu Đức Bình | 25MS13303 | _..._ |
+| Nguyễn Thị Hồng Hạnh | 25MS13316 | Logic bài toán, CI/CD, Responsible AI, endpoint batch, mô phỏng lưu lượng |
+| Nguyễn Phúc Lộc | 25MS13314 | Vận hành production, giám sát và cảnh báo |
+| Phạm Văn Duy Khánh | 25MS13313 | Frontend, backend, serving |
+| Chu Đức Bình | 25MS13303 | Kiến trúc MLOps, yêu cầu hệ thống, tech stack |
 
 ## Bài toán
 
@@ -92,7 +92,7 @@ Sau đó:
 - Giao diện web: http://localhost:8088 (qua Ingress của minikube; tab Dự đoán, Lịch sử, Mô hình, Tài liệu)
 - MLflow UI: http://localhost:5001
 - Swagger UI: http://localhost:8088/api/docs
-- MinIO console: http://localhost:9001 (mặc định `minioadmin` / `minioadmin`, đổi bằng biến `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`)
+- MinIO console: http://localhost:9001 (mặc định `minioadmin` / `minioadmin`; đặt `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` trong `.env` để đổi, xem `.env.example`)
 - Grafana: http://localhost:8088/grafana/ (tài khoản `admin`, mật khẩu là `GRAFANA_ADMIN_PASSWORD` trong `.env`)
 - Prometheus: http://localhost:8088/prometheus/ · Alertmanager: http://localhost:8088/alertmanager/
 
@@ -248,7 +248,7 @@ reports/          số liệu huấn luyện (metrics.json) và báo cáo Respon
 
 Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-model` v3 là champion, API chạy trên Kubernetes). Các câu hỏi cần nhóm chốt: [`docs/open-questions.md`](docs/open-questions.md).
 
-Đã có: pipeline huấn luyện, API có kiểm tra đầu vào và duyệt/khôi phục model, giao diện web, giám sát (Prometheus, Alertmanager, 4 dashboard Grafana, log tập trung bằng Loki và Alloy, 12 luật cảnh báo có test) trên Kubernetes, CI lint/test/build/kiểm tra cấu hình giám sát, test API (coverage 91% đo ngày 2026-10-03, 96 test; CI từ chối nếu dưới 80%).
+Đã có: pipeline huấn luyện, API có kiểm tra đầu vào, dự đoán đơn lẻ và theo lô, duyệt/khôi phục model, giao diện web, báo cáo Responsible AI (SHAP, LIME, công bằng, giảm thiên lệch), mô phỏng lưu lượng để demo cảnh báo, giám sát (Prometheus, Alertmanager, 4 dashboard Grafana, log tập trung bằng Loki và Alloy, 12 luật cảnh báo có test) trên Kubernetes, CI lint/test/build/kiểm tra cấu hình giám sát, test (coverage 94% đo ngày 2026-10-03, 138 test; CI từ chối nếu dưới 80%).
 
 Chưa hoàn thành (theo yêu cầu đề bài):
 
