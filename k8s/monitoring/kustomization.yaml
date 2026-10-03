@@ -7,6 +7,8 @@ resources:
   - prometheus.yaml
   - alertmanager.yaml
   - grafana.yaml
+  - loki.yaml
+  - alloy.yaml
   - alert-hub.yaml
   - ingress.yaml
 # Config changes get a new ConfigMap name, so the pods that use it roll automatically.
@@ -15,9 +17,13 @@ configMapGenerator:
     files: [prometheus/prometheus.yml, prometheus/alerts.yml]
   - name: alertmanager-config
     files: [alertmanager/alertmanager.yml, alertmanager/alertmanager-telegram.yml]
+  - name: loki-config
+    files: [loki/loki.yaml]
+  - name: alloy-config
+    files: [alloy/config.alloy]
   - name: grafana-datasource
     files: [grafana/datasource.yaml]
   - name: grafana-dashboard-provider
     files: [grafana/dashboards.yaml]
   - name: grafana-dashboards
-    files: [grafana/dashboards/api.json, grafana/dashboards/model.json, grafana/dashboards/versions.json]
+    files: [grafana/dashboards/api.json, grafana/dashboards/model.json, grafana/dashboards/versions.json, grafana/dashboards/logs.json]

@@ -34,7 +34,8 @@ DVC (ingest + validate) -> train (Optuna + CV) -> MLflow Tracking/Registry
 Client -> FastAPI /v1/predict  <-- nạp model ------------+
              |
              +-> /metrics -> Prometheus (trong cụm) -> Alertmanager -> alert-hub -> tab Cảnh báo
-                                          +-> Grafana (3 dashboard)
+             |                            +-> Grafana (4 dashboard) <-- Loki <-- Alloy
+             +-> log (stdout) ------------------------------------------------------+
 ```
 
 Thiết kế đầy đủ (sơ đồ kiến trúc, luồng dữ liệu, lý do chọn công nghệ, đánh đổi): [`ARCHITECTURE.md`](ARCHITECTURE.md). Kiến trúc triển khai hiện tại (Compose + Kubernetes + runner) và hướng dẫn vận hành: [`docs/deployment-guide.md`](docs/deployment-guide.md). Sơ đồ luồng MLOps: [`docs/mlops-flow.html`](docs/mlops-flow.html). Đặc tả pipeline huấn luyện: [`docs/spec-churn-training-pipeline.md`](docs/spec-churn-training-pipeline.md).
@@ -50,7 +51,7 @@ Thiết kế đầy đủ (sơ đồ kiến trúc, luồng dữ liệu, lý do c
 
 MLflow dùng cổng 5001 vì cổng 5000 bị AirPlay Receiver chiếm trên macOS.
 
-`api`, `frontend` và toàn bộ giám sát (Prometheus, Alertmanager, Grafana, alert-hub) **không nằm trong Compose**: chúng chạy trên Kubernetes (minikube), xem phần Kubernetes bên dưới và [`k8s/README.md`](k8s/README.md).
+`api`, `frontend` và toàn bộ giám sát (Prometheus, Alertmanager, Grafana, Loki, Alloy, alert-hub) **không nằm trong Compose**: chúng chạy trên Kubernetes (minikube), xem phần Kubernetes bên dưới và [`k8s/README.md`](k8s/README.md).
 
 ## Bắt đầu nhanh
 
@@ -150,7 +151,9 @@ Chạy trong cụm Kubernetes, cấu hình trong [`k8s/monitoring/`](k8s/monitor
 | Prometheus | Quét **từng pod API** (đọc annotation `prometheus.io/*`), đánh giá luật cảnh báo, giữ dữ liệu 7 ngày | `/prometheus/` |
 | Alertmanager | Gom nhóm cảnh báo, gửi webhook tới alert-hub và (tùy chọn, nếu có `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID` trong `.env`) gửi Telegram; xem `docs/deployment-guide.md` | `/alertmanager/` |
 | alert-hub | Nhận webhook, giữ danh sách cảnh báo, phục vụ tab **Cảnh báo** của giao diện (có chấm đỏ) | tab Cảnh báo |
-| Grafana | 3 dashboard: **Churn: API**, **Churn: Mô hình**, **Churn: So sánh phiên bản** | `/grafana/` |
+| Loki | Lưu và truy vấn log (giữ 7 ngày, PVC); chỉ Grafana và Alloy với tới, không mở ra ngoài | nội bộ |
+| Alloy | Thu log của mọi pod trong namespace `churn` qua Kubernetes API, tách mức log và request id của API, đẩy sang Loki | nội bộ |
+| Grafana | 4 dashboard: **Churn: API**, **Churn: Mô hình**, **Churn: So sánh phiên bản**, **Churn: Log** | `/grafana/` |
 
 Số liệu của API: `churn_admin_actions_total` (duyệt, khôi phục theo kết quả), `churn_requests_total`, `churn_request_latency_seconds` (cả hai có nhãn `model_version`), `churn_predictions_total`, `churn_probability`, `churn_model_info`, `churn_model_loaded`, `churn_model_changes_total`, `churn_unknown_category_total`, `churn_feature_values_total` và `churn_feature_baseline_share` (drift đầu vào, xem bên dưới), cùng số liệu tiến trình (`process_cpu_seconds_total`, `process_resident_memory_bytes`).
 
@@ -190,7 +193,7 @@ src/training/     ingest, validate, train, wrapper model
 src/serving/      FastAPI app, thông tin model cho giao diện
 frontend/         giao diện web (nginx + HTML/CSS/JS thuần)
 k8s/              manifest minikube: api, frontend, Ingress, canary
-k8s/monitoring/   Prometheus, Alertmanager, Grafana (dashboard), alert-hub, luật cảnh báo và test luật
+k8s/monitoring/   Prometheus, Alertmanager, Grafana (dashboard), Loki, Alloy, alert-hub, luật cảnh báo và test luật
 deploy/           Dockerfile cho api, mlflow, trainer
 src/alerts/       alert-hub: nhận webhook của Alertmanager, phục vụ tab Cảnh báo
 tests/            test dữ liệu và quality gate
@@ -201,7 +204,7 @@ docs/             hướng dẫn triển khai và vận hành, sơ đồ luồng
 
 Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-model` v3 là champion, API chạy trên Kubernetes). Các câu hỏi cần nhóm chốt: [`docs/open-questions.md`](docs/open-questions.md).
 
-Đã có: pipeline huấn luyện, API có kiểm tra đầu vào và duyệt/khôi phục model, giao diện web, giám sát (Prometheus, Alertmanager, 3 dashboard Grafana, 11 luật cảnh báo có test) trên Kubernetes, CI lint/test/build/kiểm tra cấu hình giám sát, test API (coverage 91% đo ngày 2026-10-03, 96 test; CI từ chối nếu dưới 80%).
+Đã có: pipeline huấn luyện, API có kiểm tra đầu vào và duyệt/khôi phục model, giao diện web, giám sát (Prometheus, Alertmanager, 4 dashboard Grafana, log tập trung bằng Loki và Alloy, 12 luật cảnh báo có test) trên Kubernetes, CI lint/test/build/kiểm tra cấu hình giám sát, test API (coverage 91% đo ngày 2026-10-03, 96 test; CI từ chối nếu dưới 80%).
 
 Chưa hoàn thành (theo yêu cầu đề bài):
 
