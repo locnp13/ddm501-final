@@ -53,10 +53,12 @@ flowchart LR
 | Postgres | Compose | Metadata của MLflow (run, version, alias) | nội bộ |
 | MinIO | Compose | File model, artifact, dữ liệu DVC (bucket `mlflow`, `dvc`) | 9000 (S3), 9001 (console) |
 | MLflow | Compose | Tracking server và Model Registry | http://localhost:5001 |
-| Prometheus | minikube | Quét từng pod API, đánh giá 11 luật cảnh báo, giữ dữ liệu 7 ngày (PVC) | `/prometheus/` |
+| Prometheus | minikube | Quét từng pod API, đánh giá 12 luật cảnh báo, giữ dữ liệu 7 ngày (PVC) | `/prometheus/` |
 | Alertmanager | minikube | Gom nhóm cảnh báo, gửi webhook tới alert-hub | `/alertmanager/` |
 | alert-hub | minikube | Nhận webhook, giữ danh sách cảnh báo cho tab Cảnh báo (cùng image với API, một bản sao) | tab Cảnh báo |
-| Grafana | minikube | 3 dashboard: API, Mô hình, So sánh phiên bản | `/grafana/` (admin) |
+| Loki | minikube | Lưu log, giữ 7 ngày (PVC 2 GiB); chỉ truy cập từ trong cụm | nội bộ |
+| Alloy | minikube | Thu log mọi pod trong `churn` qua Kubernetes API, đẩy sang Loki (một bản) | nội bộ |
+| Grafana | minikube | 4 dashboard: API, Mô hình, So sánh phiên bản, Log | `/grafana/` (admin) |
 | trainer | Compose (profile `train`) | Chạy pipeline huấn luyện | `docker compose run --rm trainer ...` |
 | api (2 bản sao) | minikube | Dự đoán, duyệt/khôi phục model | `http://localhost:8088/api/...` |
 | frontend | minikube | Giao diện web | http://localhost:8088 |
@@ -198,11 +200,19 @@ Init container `render-config` chọn cấu hình lúc pod khởi động: có �
 
 ### Log của API
 
-Xem bằng `kubectl -n churn logs deploy/api` (thêm `-f` để theo dõi). Mỗi dòng có dạng `thời gian MỨC logger [request-id] nội dung`. Mỗi yêu cầu tới `/v1/*` có đúng một dòng: `POST /v1/predict -> 200 in 23.0 ms (model v3)`. Dòng không có query string hay nội dung yêu cầu, nên không chứa dữ liệu khách hàng. `/health`, `/ready`, `/metrics` chỉ hiện ở mức `DEBUG`. Lỗi 500 trong dự đoán có đủ stack trace. Duyệt và khôi phục model ghi dòng `admin action=... ok|denied|failed` (không ghi khóa).
+Xem bằng `kubectl -n churn logs deploy/api` (thêm `-f` để theo dõi), hoặc trong Grafana, dashboard **Churn: Log** (log mọi pod, có ô lọc theo request id). Mỗi dòng có dạng `thời gian MỨC logger [request-id] nội dung`. Mỗi yêu cầu tới `/v1/*` có đúng một dòng: `POST /v1/predict -> 200 in 23.0 ms (model v3)`. Dòng không có query string hay nội dung yêu cầu, nên không chứa dữ liệu khách hàng. `/health`, `/ready`, `/metrics` chỉ hiện ở mức `DEBUG`. Lỗi 500 trong dự đoán có đủ stack trace. Duyệt và khôi phục model ghi dòng `admin action=... ok|denied|failed` (không ghi khóa).
 
 Mã yêu cầu lấy từ header `X-Request-ID` nếu người gọi gửi (chỉ chấp nhận chữ, số, `.`, `_`, `-`, tối đa 64 ký tự), không thì API tự sinh; mã này có trong mọi dòng log của yêu cầu và trong header trả về, để lần theo một lần gọi.
 
-**Log chưa được gom về một chỗ.** Prometheus chỉ thu số liệu, không thu log; trong cụm chưa có Loki hay bộ gom log nào, nên log chỉ xem được bằng `kubectl logs` và mất khi pod bị thay. Phần của log đã thành số liệu trong Prometheus: `churn_requests_total` (theo mã trạng thái, gồm 4xx và 5xx), `churn_unknown_category_total` và `churn_admin_actions_total` (duyệt, khôi phục theo kết quả ok, denied, failed).
+**Đường đi của log.** Pod ghi log ra stdout → Alloy đọc qua Kubernetes API (một bản sao, quyền `pods/log` trong namespace `churn`) → Loki lưu (7 ngày, PVC) → Grafana truy vấn. Alloy gắn nhãn `namespace`, `app`, `pod`, `container`; với API nó tách thêm `level` (INFO, WARNING, ERROR) thành nhãn và `request_id` thành metadata (không làm nhãn vì có quá nhiều giá trị). Truy vấn mẫu trong Grafana, mục Explore, nguồn Loki:
+
+```
+{app="api", level="ERROR"}                         # lỗi của API
+{app="api"} | request_id="trace-42"                # lần theo một lần gọi
+{namespace="churn"} |~ "(?i)admin action"          # audit duyệt và khôi phục model
+```
+
+Kiểm tra thủ công trong cụm: `kubectl -n churn exec deploy/frontend -- wget -qO- http://loki:3100/loki/api/v1/label/app/values` phải có `"api"`; script deploy cũng kiểm tra điều này. Alloy và Loki không thu log của chính chúng. Log trong Loki mất nếu xóa PVC hoặc xóa cụm. Phần của log đã thành số liệu trong Prometheus: `churn_requests_total` (theo mã trạng thái), `churn_unknown_category_total` và `churn_admin_actions_total` (duyệt, khôi phục theo kết quả ok, denied, failed).
 
 ## 6. Xử lý sự cố
 
