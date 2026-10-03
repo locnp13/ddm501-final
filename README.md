@@ -209,6 +209,16 @@ python3 -m src.simulation.traffic --mode drift --batch 50 --count 5000   # gửi
 
 Mỗi yêu cầu mang `X-Request-ID: sim-...`, nên log của API (dashboard *Churn: Log*) phân biệt được lưu lượng mô phỏng. Các luật drift cần trên 100 dự đoán trong 1 giờ và kéo dài 30 phút, nên với tốc độ 2 yêu cầu/giây hãy chạy chế độ `drift` ít nhất 45 phút. `--report` dùng thập phân vị của cả tệp dữ liệu, còn API dùng tập huấn luyện của model đang phục vụ, nên con số gần đúng chứ không trùng khớp.
 
+## Responsible AI
+
+Giải thích mô hình (SHAP và LIME), phân tích công bằng theo `gender` và `SeniorCitizen` kèm biện pháp giảm thiên lệch, quyền riêng tư và đạo đức: [`docs/responsible-ai.md`](docs/responsible-ai.md). Báo cáo số liệu tự sinh nằm ở [`reports/responsible_ai/summary.md`](reports/responsible_ai/summary.md); tạo lại cho model đang phục vụ (lần đầu cần `docker compose build trainer` để cài `shap` và `lime`):
+
+```bash
+docker compose run --rm trainer python -m src.responsible.report --log-to-run
+```
+
+Tóm tắt: ba yếu tố ảnh hưởng nhiều nhất là loại hợp đồng, thời gian sử dụng và loại internet; SHAP và LIME trùng 72% ở top 5 lý do của từng khách. Không có chênh lệch theo giới tính. Khách cao tuổi được liên hệ nhiều hơn (một phần do tỷ lệ rời bỏ thật cao gấp đôi, nhưng TPR vẫn cao hơn 14 điểm %); ngưỡng theo nhóm giảm chênh lệch với giá khoảng 4% lợi nhuận, và nhóm quyết định chưa bật trong production (lý do trong tài liệu).
+
 ## Kiểm thử và CI
 
 ```bash
@@ -227,9 +237,11 @@ k8s/              manifest minikube: api, frontend, Ingress, canary
 k8s/monitoring/   Prometheus, Alertmanager, Grafana (dashboard), Loki, Alloy, alert-hub, luật cảnh báo và test luật
 deploy/           Dockerfile cho api, mlflow, trainer
 src/alerts/       alert-hub: nhận webhook của Alertmanager, phục vụ tab Cảnh báo
+src/responsible/  báo cáo Responsible AI: SHAP, LIME, công bằng và giảm thiên lệch
 src/simulation/   mô phỏng lưu lượng (normal, drift, invalid) để demo giám sát và cảnh báo
 tests/            test dữ liệu và quality gate
-docs/             hướng dẫn triển khai và vận hành, sơ đồ luồng MLOps, spec, quyết định thiết kế
+docs/             hướng dẫn triển khai và vận hành, Responsible AI, sơ đồ luồng MLOps, spec, quyết định thiết kế
+reports/          số liệu huấn luyện (metrics.json) và báo cáo Responsible AI
 ```
 
 ## Trạng thái hiện tại
@@ -240,9 +252,6 @@ Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-
 
 Chưa hoàn thành (theo yêu cầu đề bài):
 
-- [ ] Giải thích mô hình (SHAP, LIME)
-- [ ] Giảm thiểu thiên lệch (fairness): đã đo chênh lệch tỷ lệ được chọn theo `gender` và `SeniorCitizen`, chưa có biện pháp giảm
-- [ ] Tài liệu privacy và ethics
 - [ ] Nhật ký dự đoán (để đo độ chính xác thật và chạy A/B); drift đầu vào theo PSI đã có
 - [ ] Deploy tự động trong CI: hiện là workflow bấm tay trên self-hosted runner
 - [ ] Kênh cảnh báo Slack hoặc email (Telegram đã có, tùy chọn)

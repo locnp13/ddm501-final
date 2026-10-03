@@ -246,7 +246,7 @@ Kiểm tra thủ công trong cụm: `kubectl -n churn exec deploy/frontend -- wg
 - **Canary và A/B chưa nối với luồng duyệt model.** A/B còn thiếu mã khách hàng trong request và nhật ký dự đoán (xem `rollout-strategies.md`).
 - **Postgres, MinIO, MLflow chưa chạy trong cụm**; image MinIO là bản đóng băng (`bitnamilegacy`). Chưa có sao lưu volume Docker: mất volume là mất model.
 - **Mật khẩu mặc định** của MinIO, Grafana, Postgres vẫn nằm trong `docker-compose.yml` (Q20 chưa chuyển hết sang `.env`); mới có `ADMIN_KEY`.
-- SHAP/LIME, phân tích công bằng chưa làm.
+- Báo cáo Responsible AI (`python -m src.responsible.report`) chạy tay sau khi duyệt model, chưa tự động; ngưỡng theo nhóm để giảm thiên lệch chưa bật (`docs/responsible-ai.md`, mục 3.5).
 - Các tình huống lỗi đánh dấu "Chưa" ở mục 4 chưa được thử thật.
 
 Về giám sát cụ thể:

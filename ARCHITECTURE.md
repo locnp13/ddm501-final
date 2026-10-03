@@ -147,7 +147,7 @@ sequenceDiagram
 
 ## 5. Dữ liệu và quyền riêng tư trong thiết kế
 
-API **không lưu** yêu cầu hay dự đoán. Dữ liệu duy nhất rời khỏi request là các bộ đếm theo bucket (ví dụ "tenure 12-24 tháng: 37 lần"), không truy ngược được về một khách. Điều này tránh rủi ro lưu thông tin cá nhân, nhưng đổi lại hệ thống chưa đo được độ chính xác thật theo thời gian và chưa chạy được A/B (thiếu mã khách hàng và nhật ký dự đoán). Thảo luận đầy đủ về quyền riêng tư và đạo đức sẽ nằm trong tài liệu Responsible AI.
+API **không lưu** yêu cầu hay dự đoán. Dữ liệu duy nhất rời khỏi request là các bộ đếm theo bucket (ví dụ "tenure 12-24 tháng: 37 lần"), không truy ngược được về một khách. Điều này tránh rủi ro lưu thông tin cá nhân, nhưng đổi lại hệ thống chưa đo được độ chính xác thật theo thời gian và chưa chạy được A/B (thiếu mã khách hàng và nhật ký dự đoán). Thảo luận đầy đủ về quyền riêng tư và đạo đức: [`docs/responsible-ai.md`](docs/responsible-ai.md).
 
 ## 6. Lý do chọn công nghệ
 
@@ -201,4 +201,4 @@ Toàn bộ chạy cục bộ nên chi phí tiền bằng 0, đổi lại là chi
 
 ## 8. Hạn chế đã biết
 
-Danh sách đầy đủ ở `docs/deployment-guide.md`, mục 7. Những điểm ảnh hưởng tới thiết kế: image trên cụm không phải image CI đã đẩy lên GHCR (CI build amd64, cụm chạy arm64); canary và A/B chưa nối với luồng duyệt model; cảnh báo chỉ hiện trên UI, chưa có kênh ngoài; hạ tầng ML chưa được giám sát và chưa sao lưu; chưa có SHAP/LIME và phân tích công bằng.
+Danh sách đầy đủ ở `docs/deployment-guide.md`, mục 7. Những điểm ảnh hưởng tới thiết kế: image trên cụm không phải image CI đã đẩy lên GHCR (CI build amd64, cụm chạy arm64); canary và A/B chưa nối với luồng duyệt model; cảnh báo chỉ hiện trên UI, chưa có kênh ngoài; hạ tầng ML chưa được giám sát và chưa sao lưu; ngưỡng theo nhóm để giảm thiên lệch đã có nhưng chưa bật (xem `docs/responsible-ai.md`).
