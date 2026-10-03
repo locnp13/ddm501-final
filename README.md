@@ -189,6 +189,26 @@ Luật cảnh báo (`k8s/monitoring/prometheus/alerts.yml`, được kiểm th�
 
 Giám sát không đo được độ chính xác thật của model vì nhãn churn đến muộn; `PredictionDrift`, `UnknownCategorySpike` và `FeatureDrift` chỉ báo hiệu dữ liệu hoặc dự đoán đã đổi.
 
+### Mô phỏng lưu lượng để demo cảnh báo
+
+Đồ án không có khách hàng thật, nên `src/simulation/traffic.py` đóng vai khách: lấy mẫu khách từ `data/processed/churn.csv` và gửi tới API với tốc độ chọn được. **Đây là dữ liệu mô phỏng** (quyết định Q17 trong `docs/open-questions.md`). Script chỉ dùng thư viện chuẩn của Python, chạy được bằng `python3` có sẵn trên máy (cần cổng 8088 đang mở, ví dụ bằng `./run.sh`).
+
+| Chế độ | Gửi gì | Kết quả mong đợi trên Grafana và tab Cảnh báo |
+|---|---|---|
+| `normal` | Khách lấy nguyên từ dữ liệu | PSI mọi feature dưới 0,1; không có cảnh báo drift |
+| `drift` | Dịch phân phối có kiểm soát (mỗi thay đổi áp dụng với xác suất `--strength`, mặc định 0,7): hợp đồng theo tháng, `tenure` ngắn đi 4 lần, `MonthlyCharges` cao hơn, thanh toán bằng séc điện tử | PSI của `tenure`, `TotalCharges`, `MonthlyCharges`, `Contract`, `PaymentMethod` vượt 0,2; `FeatureDrift` (và thường cả `PredictionDrift`) bật sau khoảng 30 phút |
+| `invalid` | Trộn `--invalid-share` (mặc định 30%) yêu cầu sai: `tenure` âm, thiếu trường, sai kiểu | Tỷ lệ 422 vượt 20%, `HighValidationErrorRate` bật sau khoảng 10 phút |
+
+```bash
+python3 -m src.simulation.traffic --mode drift --report          # ước lượng PSI từng feature, không gửi gì
+python3 -m src.simulation.traffic --mode normal --rate 2 --duration 1800
+python3 -m src.simulation.traffic --mode drift  --rate 2 --duration 3600
+python3 -m src.simulation.traffic --mode invalid --rate 2 --duration 1200
+python3 -m src.simulation.traffic --mode drift --batch 50 --count 5000   # gửi theo lô qua /v1/predict/batch
+```
+
+Mỗi yêu cầu mang `X-Request-ID: sim-...`, nên log của API (dashboard *Churn: Log*) phân biệt được lưu lượng mô phỏng. Các luật drift cần trên 100 dự đoán trong 1 giờ và kéo dài 30 phút, nên với tốc độ 2 yêu cầu/giây hãy chạy chế độ `drift` ít nhất 45 phút. `--report` dùng thập phân vị của cả tệp dữ liệu, còn API dùng tập huấn luyện của model đang phục vụ, nên con số gần đúng chứ không trùng khớp.
+
 ## Kiểm thử và CI
 
 ```bash
@@ -207,6 +227,7 @@ k8s/              manifest minikube: api, frontend, Ingress, canary
 k8s/monitoring/   Prometheus, Alertmanager, Grafana (dashboard), Loki, Alloy, alert-hub, luật cảnh báo và test luật
 deploy/           Dockerfile cho api, mlflow, trainer
 src/alerts/       alert-hub: nhận webhook của Alertmanager, phục vụ tab Cảnh báo
+src/simulation/   mô phỏng lưu lượng (normal, drift, invalid) để demo giám sát và cảnh báo
 tests/            test dữ liệu và quality gate
 docs/             hướng dẫn triển khai và vận hành, sơ đồ luồng MLOps, spec, quyết định thiết kế
 ```
