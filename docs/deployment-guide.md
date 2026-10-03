@@ -250,6 +250,7 @@ Về giám sát cụ thể:
 - **Drift theo feature dùng PSI trên cửa sổ 1 giờ**: ít yêu cầu thì PSI nhiễu (cỡ (số nhóm − 1) / số yêu cầu, khoảng 0,04 với 240 yêu cầu), nên chỉ tính khi có trên 100 dự đoán. Model huấn luyện trước tính năng này không được giám sát cho tới khi bổ sung thống kê. Chưa lưu nhật ký dự đoán (vì vậy chưa đo được độ chính xác thật hay chạy A/B).
 - **Dashboard Grafana mới được kiểm tra bằng truy vấn** (31 trong 33 biểu thức có dữ liệu, 0 lỗi; 2 biểu thức lỗi 5xx đã được sửa để hiện 0), tôi chưa xem giao diện Grafana bằng mắt. Dashboard "So sánh phiên bản" chưa được chạy với hai phiên bản thật.
 - **Hạ tầng không được giám sát**: MLflow, MinIO, Postgres và tài nguyên của node chưa có số liệu hay cảnh báo.
-- **Dữ liệu giám sát nằm trên máy này**: Prometheus (PVC minikube, 7 ngày) mất nếu xóa cụm; Alertmanager và Grafana dùng `emptyDir`.
+- **Dữ liệu giám sát nằm trên máy này**: Prometheus và Loki (mỗi bên một PVC minikube 2 GiB, 7 ngày; dữ liệu ở `/tmp/hostpath-provisioner/churn/...` trong node) giữ được khi pod hay cả cụm khởi động lại, nhưng mất nếu `minikube delete`, xóa PVC hoặc xóa namespace; Alertmanager và Grafana dùng `emptyDir`.
+- **Log**: chỉ thu log của pod trong namespace `churn`; log của MLflow, MinIO, Postgres (Compose) chưa được thu. Alloy chạy một bản, nếu nó khởi động lại thì những dòng sinh ra lúc nó tắt có thể không được thu. Chưa có luật cảnh báo dựa trên nội dung log, và chính Loki, Alloy chưa được Prometheus giám sát.
 - **Liên kết trong Alertmanager/Prometheus dùng `localhost:8088`** (địa chỉ cổng chuyển tiếp), nên chỉ đúng khi mở qua cổng đó.
 - **Sau khi bấm deploy, nhật ký cảnh báo trong hub bị xóa** vì pod hub được khởi động lại.

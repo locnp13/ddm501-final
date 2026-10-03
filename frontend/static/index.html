@@ -116,7 +116,7 @@
         </section>
         <section>
           <h2>Giám sát và cảnh báo</h2>
-          <p>Prometheus thu số liệu từ từng pod API, Grafana vẽ dashboard (<b>Churn: API</b>, <b>Churn: Mô hình</b>, <b>Churn: So sánh phiên bản</b>), và Alertmanager gửi cảnh báo về tab <b>Cảnh báo</b>. Chấm đỏ trên tab báo có cảnh báo đang bắn.</p>
+          <p>Prometheus thu số liệu từ từng pod API, Grafana vẽ dashboard (<b>Churn: API</b>, <b>Churn: Mô hình</b>, <b>Churn: So sánh phiên bản</b>, <b>Churn: Log</b>), và Alertmanager gửi cảnh báo về tab <b>Cảnh báo</b>. Chấm đỏ trên tab báo có cảnh báo đang bắn. Log của API được Alloy thu về Loki (giữ 7 ngày); xem trong Grafana, dashboard <b>Churn: Log</b>, và lần theo một lần gọi bằng mã yêu cầu trong header <code>X-Request-ID</code>.</p>
           <ul>
             <li><b>Nghiêm trọng</b> (critical): API không phản hồi, lỗi máy chủ trên 5%.</li>
             <li><b>Cảnh báo</b> (warning): độ trễ cao, bộ nhớ gần giới hạn, dữ liệu vào bị từ chối nhiều, xuất hiện giá trị chưa từng thấy, <b>xác suất dự đoán trung bình lệch khỏi tỷ lệ huấn luyện</b> (dấu hiệu drift).</li>

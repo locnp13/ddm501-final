@@ -22,7 +22,7 @@ Tài liệu ghi vai trò và trách nhiệm của từng thành viên, cùng quy
 | Khánh | Frontend | `frontend/` |
 | Khánh | Backend và serving | `src/serving/`, `deploy/Dockerfile.api`, `tests/test_api.py` |
 | Lộc | Môi trường production (Kubernetes, Compose, runner) | `k8s/base/`, `docker-compose.yml`, `scripts/deploy-local.sh`, `run.sh` |
-| Lộc | Giám sát và cảnh báo | `k8s/monitoring/` (Prometheus, Alertmanager, Grafana), `src/alerts/hub.py` |
+| Lộc | Giám sát và cảnh báo | `k8s/monitoring/` (Prometheus, Alertmanager, Grafana, Loki, Alloy), `src/alerts/hub.py` |
 | Lộc | Hướng dẫn vận hành | `docs/deployment-guide.md`, `k8s/README.md` |
 
 Một số hạng mục có liên quan chéo: phần giám sát cần Khánh xuất metric từ API (`src/serving/app.py`), và luồng deploy của Hạnh chạy qua script và runner của Lộc. Khi sửa phần của người khác, mở PR và gắn người đó review.
