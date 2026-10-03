@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Bring the whole stack up if it is not already running, forward the ingress port and open the UIs.
 #   ./run.sh         start whatever is down, then open the browser
-#   ./run.sh stop    stop the port-forward (containers and minikube are left running)
+#   ./run.sh stop    stop the port-forward and the Kubernetes dashboard proxy (containers and minikube keep running)
 # Steps skipped when already done: Docker Desktop, docker compose services, minikube, deploy to the
 # cluster. First run also builds and deploys the images (a few minutes) and needs .env (see .env.example).
+# Also enables the minikube addons ingress, metrics-server (CPU/memory in the dashboard) and dashboard.
 set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.docker/bin:$PATH"
@@ -15,6 +16,9 @@ PORT=8088
 BASE="http://localhost:$PORT"
 PID_FILE="${TMPDIR:-/tmp}/churn-port-forward.pid"
 LOG_FILE="${TMPDIR:-/tmp}/churn-port-forward.log"
+DASH_PID_FILE="${TMPDIR:-/tmp}/churn-dashboard.pid"
+DASH_URL_FILE="${TMPDIR:-/tmp}/churn-dashboard.url"
+DASH_LOG="${TMPDIR:-/tmp}/churn-dashboard.log"
 
 stop_forward() {
   if [[ -f "$PID_FILE" ]]; then
@@ -23,9 +27,18 @@ stop_forward() {
   fi
 }
 
+# `minikube dashboard` keeps a kubectl proxy child alive; stop both, including a copy started by hand.
+stop_dashboard() {
+  [[ -f "$DASH_PID_FILE" ]] && kill "$(cat "$DASH_PID_FILE")" 2>/dev/null || true
+  pkill -f "minikube dashboard -p $PROFILE" 2>/dev/null || true
+  pkill -f "kubectl --context $PROFILE proxy" 2>/dev/null || true
+  rm -f "$DASH_PID_FILE" "$DASH_URL_FILE"
+}
+
 if [[ "${1:-}" == "stop" ]]; then
   stop_forward
-  echo "Port-forward stopped. Containers and minikube keep running (minikube stop -p $PROFILE to free memory)."
+  stop_dashboard
+  echo "Port-forward and dashboard proxy stopped. Containers and minikube keep running (minikube stop -p $PROFILE to free memory)."
   exit 0
 fi
 
@@ -62,7 +75,9 @@ if minikube -p "$PROFILE" status >/dev/null 2>&1; then
 else
   minikube start -p "$PROFILE" --driver=docker --cpus=4 --memory=4096
 fi
-minikube -p "$PROFILE" addons enable ingress >/dev/null 2>&1 || true
+for addon in ingress metrics-server dashboard; do
+  minikube -p "$PROFILE" addons enable "$addon" >/dev/null 2>&1 || echo "WARNING: could not enable addon $addon"
+done
 
 step "Cluster workloads"
 if ! kubectl --context "$PROFILE" get ns "$NS" >/dev/null 2>&1; then
@@ -101,10 +116,34 @@ echo "api health: $health"
 [[ "$health" == *'"model_loaded":true'* ]] \
   || echo "NOTE: no champion model yet. Train (docker compose run --rm trainer dvc repro), then approve it in the Mô hình tab."
 
+step "Kubernetes dashboard"
+DASH_URL=""
+if [[ -f "$DASH_PID_FILE" && -f "$DASH_URL_FILE" ]] && kill -0 "$(cat "$DASH_PID_FILE")" 2>/dev/null \
+   && curl -fsS --max-time 3 -o /dev/null "$(cat "$DASH_URL_FILE")"; then
+  DASH_URL="$(cat "$DASH_URL_FILE")"
+else
+  stop_dashboard
+  nohup minikube dashboard -p "$PROFILE" --url >"$DASH_LOG" 2>&1 &
+  echo $! >"$DASH_PID_FILE"
+  for _ in $(seq 1 60); do
+    DASH_URL="$(grep -Eo 'http://127\.0\.0\.1:[0-9]+[^ ]*' "$DASH_LOG" | head -1 || true)"
+    [[ -n "$DASH_URL" ]] && break
+    sleep 2
+  done
+  if [[ -n "$DASH_URL" ]]; then
+    echo "$DASH_URL" >"$DASH_URL_FILE"
+  else
+    echo "WARNING: the dashboard did not start (see $DASH_LOG); continuing without it"
+  fi
+fi
+[[ -z "$DASH_URL" ]] || echo "dashboard: $DASH_URL"
+
 step "Opening URLs"
-for url in "$BASE/" "$BASE/api/docs" "$BASE/grafana/" "$BASE/prometheus/" "$BASE/alertmanager/" "http://localhost:5001" "http://localhost:9001"; do
+URLS=("$BASE/" "$BASE/api/docs" "$BASE/grafana/" "$BASE/prometheus/" "$BASE/alertmanager/" "http://localhost:5001" "http://localhost:9001")
+[[ -z "$DASH_URL" ]] || URLS+=("${DASH_URL}#/workloads?namespace=$NS")
+for url in "${URLS[@]}"; do
   echo "$url"
   open "$url"
 done
 echo
-echo "Done. Stop the port-forward with ./run.sh stop"
+echo "Done. Stop the port-forward and the dashboard proxy with ./run.sh stop"

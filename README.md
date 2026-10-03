@@ -63,10 +63,10 @@ Sau khi đã cài đặt lần đầu (các bước bên dưới), mỗi lần d
 
 ```bash
 ./run.sh        # bật dịch vụ nào chưa chạy, mở cổng 8088, mở các URL trong trình duyệt
-./run.sh stop   # tắt phần chuyển tiếp cổng (container và minikube vẫn chạy)
+./run.sh stop   # tắt chuyển tiếp cổng và proxy của Kubernetes dashboard (container và minikube vẫn chạy)
 ```
 
-`run.sh` bật Docker Desktop, các container Compose (Postgres, MinIO, MLflow) và minikube nếu chưa chạy; deploy api, frontend và giám sát lên cụm nếu chưa có; chuyển tiếp cổng 8088 tới Ingress; rồi mở UI, Swagger, Grafana, Prometheus, Alertmanager, MLflow và MinIO. Script không huấn luyện hay duyệt model: nếu chưa có `champion` nó chỉ nhắc. Cần có `.env` (xem bước 0).
+`run.sh` bật Docker Desktop, các container Compose (Postgres, MinIO, MLflow) và minikube nếu chưa chạy; deploy api, frontend và giám sát lên cụm nếu chưa có; bật các addon `metrics-server` và `dashboard` của minikube; chuyển tiếp cổng 8088 tới Ingress; chạy proxy của Kubernetes dashboard (cổng ngẫu nhiên, in ra khi chạy); rồi mở UI, Swagger, Grafana, Prometheus, Alertmanager, MLflow, MinIO và Kubernetes dashboard. Script không huấn luyện hay duyệt model: nếu chưa có `champion` nó chỉ nhắc. Cần có `.env` (xem bước 0).
 
 ### Cài đặt từng bước
 

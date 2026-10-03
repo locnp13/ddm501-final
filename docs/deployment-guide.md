@@ -170,7 +170,9 @@ Lý do có bước kiểm tra runner: job gửi tới runner đang offline sẽ 
 
 | Việc | Lệnh |
 |---|---|
-| Mở giao diện | `kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8088:80` rồi http://localhost:8088 |
+| Mở giao diện | `./run.sh` (bật mọi thứ còn thiếu và mở trình duyệt), hoặc tay: `kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8088:80` rồi http://localhost:8088 |
+| Xem cụm bằng giao diện đồ họa | Kubernetes dashboard: `./run.sh` đã chạy sẵn và mở tab; hoặc tay `minikube dashboard -p churn --url` (CPU và bộ nhớ cần addon `metrics-server`, `run.sh` đã bật) |
+| Tắt chuyển tiếp cổng và proxy dashboard | `./run.sh stop` (container và minikube vẫn chạy) |
 | Xem trạng thái cụm | `kubectl -n churn get pods` |
 | Xem log API | `kubectl -n churn logs deploy/api` |
 | Ép API nạp lại model | `kubectl -n churn rollout restart deploy/api` |
