@@ -178,7 +178,7 @@ Lý do có bước kiểm tra runner: job gửi tới runner đang offline sẽ 
 | Dừng cụm khi không dùng (giải phóng khoảng 4 GB) | `minikube stop -p churn` |
 | Kiểm tra runner | `cd ~/actions-runner-ddm501 && ./svc.sh status` |
 
-Cấu hình qua biến môi trường của API: `MODEL_URI` (mặc định `models:/churn-model@champion`; `models:/churn-model/3` để ghim một phiên bản), `MODEL_POLL_SECONDS` (theo dõi alias, K8s đặt 30), `ADMIN_KEY` (rỗng thì tắt duyệt/khôi phục), `ROOT_PATH` (`/api` khi đứng sau Ingress). Đổi `ADMIN_KEY` trong `.env` thì phải tạo lại Secret `churn-secrets` rồi `rollout restart deploy/api`.
+Cấu hình qua biến môi trường của API: `MODEL_URI` (mặc định `models:/churn-model@champion`; `models:/churn-model/3` để ghim một phiên bản), `MODEL_POLL_SECONDS` (theo dõi alias, K8s đặt 30), `ADMIN_KEY` (rỗng thì tắt duyệt/khôi phục), `ROOT_PATH` (`/api` khi đứng sau Ingress), `LOG_LEVEL` (mặc định `INFO`; `DEBUG` để thấy cả probe và scrape). Đổi `ADMIN_KEY` trong `.env` thì phải tạo lại Secret `churn-secrets` rồi `rollout restart deploy/api`.
 
 ### Bật cảnh báo qua Telegram
 
@@ -195,6 +195,14 @@ kubectl -n churn logs deploy/alertmanager -c render-config   # "Telegram notific
 ```
 
 Init container `render-config` chọn cấu hình lúc pod khởi động: có đủ hai khóa thì dùng `alertmanager-telegram.yml` (điền chat id, ghi token ra tệp), thiếu thì dùng `alertmanager.yml` chỉ gửi vào hub. Sau khi tạo lại Secret, nhớ khởi động lại `deploy/api` và `deploy/grafana` nếu bạn đã đổi `ADMIN_KEY` hoặc mật khẩu Grafana. Tin gửi dạng văn bản thuần: `[CRITICAL] tên cảnh báo`, tóm tắt, mô tả; khi hết cảnh báo có tin `[RESOLVED]`. Nhóm cảnh báo lặp lại sau 4 giờ nếu vẫn bắn (`repeat_interval`).
+
+### Log của API
+
+Xem bằng `kubectl -n churn logs deploy/api` (thêm `-f` để theo dõi). Mỗi dòng có dạng `thời gian MỨC logger [request-id] nội dung`. Mỗi yêu cầu tới `/v1/*` có đúng một dòng: `POST /v1/predict -> 200 in 23.0 ms (model v3)`. Dòng không có query string hay nội dung yêu cầu, nên không chứa dữ liệu khách hàng. `/health`, `/ready`, `/metrics` chỉ hiện ở mức `DEBUG`. Lỗi 500 trong dự đoán có đủ stack trace. Duyệt và khôi phục model ghi dòng `admin action=... ok|denied|failed` (không ghi khóa).
+
+Mã yêu cầu lấy từ header `X-Request-ID` nếu người gọi gửi (chỉ chấp nhận chữ, số, `.`, `_`, `-`, tối đa 64 ký tự), không thì API tự sinh; mã này có trong mọi dòng log của yêu cầu và trong header trả về, để lần theo một lần gọi.
+
+**Log chưa được gom về một chỗ.** Prometheus chỉ thu số liệu, không thu log; trong cụm chưa có Loki hay bộ gom log nào, nên log chỉ xem được bằng `kubectl logs` và mất khi pod bị thay. Phần của log đã thành số liệu trong Prometheus: `churn_requests_total` (theo mã trạng thái, gồm 4xx và 5xx), `churn_unknown_category_total` và `churn_admin_actions_total` (duyệt, khôi phục theo kết quả ok, denied, failed).
 
 ## 6. Xử lý sự cố
 

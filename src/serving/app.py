@@ -2,9 +2,12 @@
 import hmac
 import logging
 import os
+import re
 import threading
 import time
-from contextlib import asynccontextmanager
+import uuid
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,6 +26,36 @@ from src.training.registry import CHALLENGER, CHAMPION, MODEL_NAME
 
 logger = logging.getLogger("churn-api")
 
+request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
+SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+QUIET_PATHS = {"/health", "/ready", "/metrics"}  # probes and scrapes hit these every few seconds: DEBUG only
+
+
+class RequestIdFilter(logging.Filter):
+    """Stamp every record with the id of the request being served, so one call can be followed across log lines."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_var.get()
+        return True
+
+
+def configure_logging() -> None:
+    """Log to stderr with time, level, logger and request id; LOG_LEVEL (default INFO) sets the threshold.
+
+    uvicorn only configures its own loggers, so without this the app's INFO lines were dropped
+    (root level WARNING) and warnings had no timestamp.
+    """
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s",
+    )
+    for handler in logging.getLogger().handlers:  # the format needs the field on every record these handlers see
+        handler.addFilter(RequestIdFilter())
+    logger.addFilter(RequestIdFilter())  # and the app's own records carry it whatever handler reads them
+
+
+configure_logging()
+
 MODEL_URI = os.getenv("MODEL_URI", "models:/churn-model@champion")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "")  # empty disables model approval through the API
 # > 0: follow the registry alias, so several replicas converge after an approval or rollback.
@@ -39,6 +72,11 @@ CHURN_PROBABILITY = Histogram(
 MODEL_LOADED = Gauge("churn_model_loaded", "1 if a model is loaded, else 0")
 MODEL_INFO = Gauge("churn_model_info", "1 for the model version this instance serves", ["version"])
 MODEL_CHANGES = Counter("churn_model_changes_total", "Model switches by kind", ["kind"])
+ADMIN_ACTIONS = Counter(
+    "churn_admin_actions_total",
+    "Model approval and rollback attempts by outcome (ok, denied, failed)",
+    ["action", "result"],
+)
 UNKNOWN_CATEGORY = Counter(
     "churn_unknown_category_total", "Requests with a category never seen in training", ["field"]
 )
@@ -134,6 +172,42 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """One log line per request: method, path, status, duration and model version.
+
+    No query string and no body, so no customer data reaches the logs. A caller's X-Request-ID is
+    kept when it is plain text (it could otherwise forge log lines); the id is echoed in the response.
+    """
+    incoming = request.headers.get("x-request-id", "")
+    request_id = incoming if SAFE_REQUEST_ID.match(incoming) else uuid.uuid4().hex[:12]
+    token = request_id_var.set(request_id)
+    start = time.perf_counter()
+    try:
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception("%s %s failed with an unhandled error", request.method, request.url.path)
+            raise
+        if request.url.path in QUIET_PATHS:
+            level = logging.DEBUG
+        else:
+            level = logging.ERROR if response.status_code >= 500 else logging.INFO
+        logger.log(
+            level,
+            "%s %s -> %d in %.1f ms (model v%s)",
+            request.method,
+            request.url.path,
+            response.status_code,
+            (time.perf_counter() - start) * 1000,
+            served_version(),
+        )
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        request_id_var.reset(token)
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     """Liveness/readiness probe; reports whether a model is loaded."""
@@ -196,6 +270,7 @@ def predict(features: CustomerFeatures) -> PredictResponse:
         raise
     except Exception as exc:
         REQUESTS.labels("predict", "500", version).inc()
+        logger.exception("Prediction failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
         LATENCY.labels("predict", version).observe(time.perf_counter() - start)
@@ -230,14 +305,35 @@ def challenger_info() -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="No model is waiting for approval") from exc
 
 
-def _require_admin(key: str | None) -> None:
+def _deny(action: str, reason: str, status: int, detail: str) -> HTTPException:
+    """Count and log a refused admin call (never the key itself), then return the error to raise."""
+    ADMIN_ACTIONS.labels(action, "denied").inc()
+    logger.warning("admin action=%s denied: %s", action, reason)
+    return HTTPException(status_code=status, detail=detail)
+
+
+@contextmanager
+def _audited(action: str):
+    """Count and log an admin call that passed the key check but could not be carried out."""
+    try:
+        yield
+    except HTTPException as exc:
+        ADMIN_ACTIONS.labels(action, "failed").inc()
+        logger.warning("admin action=%s failed: %s", action, exc.detail)
+        raise
+
+
+def _require_admin(key: str | None, action: str) -> None:
     if not ADMIN_KEY:
-        raise HTTPException(status_code=503, detail="Approval is disabled: ADMIN_KEY is not configured")
+        raise _deny(action, "ADMIN_KEY is not configured", 503, "Approval is disabled: ADMIN_KEY is not configured")
     if not key or not hmac.compare_digest(key.encode(), ADMIN_KEY.encode()):
-        raise HTTPException(status_code=401, detail="Invalid admin key")
+        raise _deny(action, "invalid admin key", 401, "Invalid admin key")
     if is_pinned():
-        raise HTTPException(
-            status_code=409, detail=f"This instance is pinned to {MODEL_URI}; deploy another version instead"
+        raise _deny(
+            action,
+            f"instance is pinned to {MODEL_URI}",
+            409,
+            f"This instance is pinned to {MODEL_URI}; deploy another version instead",
         )
 
 
@@ -268,7 +364,8 @@ def _activate(client: MlflowClient, version: str, kind: str, tag: str) -> dict[s
     client.set_model_version_tag(MODEL_NAME, version, tag, datetime.now(timezone.utc).isoformat(timespec="seconds"))
     set_served(model, {**info, "alias": CHAMPION})
     MODEL_CHANGES.labels(kind).inc()
-    logger.info("Model v%s now served as %s (%s)", version, CHAMPION, kind)
+    ADMIN_ACTIONS.labels(kind, "ok").inc()
+    logger.info("admin action=%s ok: v%s is now served as %s", kind, version, CHAMPION)
     return state["info"]
 
 
@@ -288,8 +385,8 @@ def approve_challenger(body: VersionRequest, x_admin_key: str | None = Header(de
     Needs the admin key. `version` must still be the current challenger, so an approval always
     applies to the model the approver was looking at.
     """
-    _require_admin(x_admin_key)
-    with promote_lock:
+    _require_admin(x_admin_key, "approve")
+    with _audited("approve"), promote_lock:
         client = MlflowClient()
         try:
             current = client.get_model_version_by_alias(MODEL_NAME, CHALLENGER)
@@ -306,8 +403,8 @@ def approve_challenger(body: VersionRequest, x_admin_key: str | None = Header(de
 @app.post("/v1/model/rollback")
 def restore_version(body: VersionRequest, x_admin_key: str | None = Header(default=None)) -> dict[str, Any]:
     """Serve an earlier registered version again by pointing the champion alias at it. Needs the admin key."""
-    _require_admin(x_admin_key)
-    with promote_lock:
+    _require_admin(x_admin_key, "rollback")
+    with _audited("rollback"), promote_lock:
         client = MlflowClient()
         try:
             client.get_model_version(MODEL_NAME, body.version)

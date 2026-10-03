@@ -1,4 +1,7 @@
 """API tests against a real (tiny) trained model in a temporary MLflow store."""
+import logging
+import re
+
 import mlflow
 import pytest
 from fastapi.testclient import TestClient
@@ -205,6 +208,53 @@ def test_a_model_without_a_baseline_still_predicts_and_exports_no_drift_metrics(
 
 
 # Must stay last: it points MLflow at an empty store, which the tests above must not see.
+def test_each_request_is_logged_with_status_duration_and_an_id(client, caplog) -> None:
+    caplog.set_level(logging.INFO, logger="churn-api")
+    res = client.post("/v1/predict", json=features(), headers={"X-Request-ID": "trace-42"})
+    assert res.headers["X-Request-ID"] == "trace-42"
+    lines = [r for r in caplog.records if "POST /v1/predict" in r.getMessage()]
+    assert len(lines) == 1 and lines[0].levelno == logging.INFO
+    assert "-> 200" in lines[0].getMessage() and "model v1" in lines[0].getMessage()
+    assert lines[0].request_id == "trace-42"
+
+
+def test_a_request_id_that_could_forge_log_lines_is_replaced(client) -> None:
+    res = client.get("/health", headers={"X-Request-ID": "x\nERROR forged"})
+    assert re.fullmatch(r"[0-9a-f]{12}", res.headers["X-Request-ID"])
+
+
+def test_probes_and_scrapes_stay_out_of_the_info_log(client, caplog) -> None:
+    caplog.set_level(logging.INFO, logger="churn-api")
+    for path in ("/health", "/ready", "/metrics"):
+        client.get(path)
+    assert [r for r in caplog.records if r.name == "churn-api"] == []
+
+
+def test_rejected_input_is_logged_as_a_422(client, caplog) -> None:
+    caplog.set_level(logging.INFO, logger="churn-api")
+    client.post("/v1/predict", json={**features(), "tenure": -1})
+    assert any("-> 422" in r.getMessage() for r in caplog.records)
+
+
+def test_logs_never_contain_customer_values(client, caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    client.post("/v1/predict", json=features(MonthlyCharges=88.25, tenure=71))
+    assert "88.25" not in caplog.text and "MonthlyCharges" not in caplog.text
+
+
+def test_prediction_failure_is_logged_with_its_traceback(client, monkeypatch, caplog) -> None:
+    class Broken:
+        def predict(self, _):
+            raise RuntimeError("boom")
+
+    caplog.set_level(logging.INFO, logger="churn-api")
+    monkeypatch.setitem(app_module.state, "model", Broken())
+    assert client.post("/v1/predict", json=features()).status_code == 500
+    failed = [r for r in caplog.records if r.getMessage() == "Prediction failed"]
+    assert len(failed) == 1 and failed[0].exc_info[0] is RuntimeError
+    assert any(r.levelno == logging.ERROR and "-> 500" in r.getMessage() for r in caplog.records)
+
+
 def test_no_model_gives_503(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/empty.db")
