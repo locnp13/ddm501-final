@@ -51,10 +51,13 @@ def test_challenger_is_described_next_to_the_champion(client) -> None:
     assert client.get("/v1/model").json()["version"] == "1"
 
 
-def test_wrong_or_missing_key_is_rejected(client, pending) -> None:
+def test_wrong_or_missing_key_is_rejected(client, pending, caplog) -> None:
     for headers in ({}, {"X-Admin-Key": "nope"}, {"X-Admin-Key": b"\xff\xfe"}):
         assert client.post("/v1/model/promote", json={"version": "2"}, headers=headers).status_code == 401
     assert alias_version(pending, CHAMPION) == "1"
+    denied = [m for m in caplog.messages if "admin action=approve denied: invalid admin key" in m]
+    assert len(denied) == 3 and not any("nope" in m for m in caplog.messages)
+    assert 'churn_admin_actions_total{action="approve",result="denied"}' in client.get("/metrics").text
 
 
 def test_approval_is_disabled_without_a_configured_key(client, monkeypatch) -> None:
@@ -86,6 +89,7 @@ def test_approval_serves_the_new_model_without_restart(client, pending) -> None:
     assert client.get("/v1/model").json()["version"] == "2"
     assert client.post("/v1/predict", json=features()).json()["model_version"] == "2"
     assert 'churn_model_changes_total{kind="approve"} 1.0' in client.get("/metrics").text
+    assert 'churn_admin_actions_total{action="approve",result="ok"} 1.0' in client.get("/metrics").text
     assert client.get("/v1/model/challenger").status_code == 404
     again = client.post("/v1/model/promote", json={"version": "2"}, headers={"X-Admin-Key": KEY})
     assert again.status_code == 404  # nothing left to approve
@@ -104,6 +108,7 @@ def test_rollback_needs_the_key_and_a_real_other_version(client, pending) -> Non
     assert client.post("/v1/model/rollback", json={"version": "99"}, headers={"X-Admin-Key": KEY}).status_code == 404
     assert client.post("/v1/model/rollback", json={"version": "2"}, headers={"X-Admin-Key": KEY}).status_code == 409
     assert alias_version(pending, CHAMPION) == "2"
+    assert 'churn_admin_actions_total{action="rollback",result="failed"} 2.0' in client.get("/metrics").text
 
 
 def test_incompatible_version_is_refused_and_nothing_changes(client, pending, monkeypatch) -> None:

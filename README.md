@@ -152,7 +152,7 @@ Chạy trong cụm Kubernetes, cấu hình trong [`k8s/monitoring/`](k8s/monitor
 | alert-hub | Nhận webhook, giữ danh sách cảnh báo, phục vụ tab **Cảnh báo** của giao diện (có chấm đỏ) | tab Cảnh báo |
 | Grafana | 3 dashboard: **Churn: API**, **Churn: Mô hình**, **Churn: So sánh phiên bản** | `/grafana/` |
 
-Số liệu của API: `churn_requests_total`, `churn_request_latency_seconds` (cả hai có nhãn `model_version`), `churn_predictions_total`, `churn_probability`, `churn_model_info`, `churn_model_loaded`, `churn_model_changes_total`, `churn_unknown_category_total`, `churn_feature_values_total` và `churn_feature_baseline_share` (drift đầu vào, xem bên dưới), cùng số liệu tiến trình (`process_cpu_seconds_total`, `process_resident_memory_bytes`).
+Số liệu của API: `churn_admin_actions_total` (duyệt, khôi phục theo kết quả), `churn_requests_total`, `churn_request_latency_seconds` (cả hai có nhãn `model_version`), `churn_predictions_total`, `churn_probability`, `churn_model_info`, `churn_model_loaded`, `churn_model_changes_total`, `churn_unknown_category_total`, `churn_feature_values_total` và `churn_feature_baseline_share` (drift đầu vào, xem bên dưới), cùng số liệu tiến trình (`process_cpu_seconds_total`, `process_resident_memory_bytes`).
 
 Luật cảnh báo (`k8s/monitoring/prometheus/alerts.yml`, được kiểm thử bằng `promtool test rules` trong CI). Ngưỡng là điểm khởi đầu của dự án, chưa đo từ dữ liệu thật:
 
