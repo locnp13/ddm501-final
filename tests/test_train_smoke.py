@@ -28,6 +28,10 @@ def test_training_registers_challenger_and_promotes(telco_clean, mlflow_sqlite) 
     assert outcome["passed"], outcome["reasons"]
     assert 0.0 <= outcome["brier"] <= 1.0
     assert outcome["pr_auc"] > 0
+    assert 0.0 < outcome["test_churn_rate"] < 1.0
+    assert outcome["selected"]["model"] in PARAMS["train"]["models"]
+    assert isinstance(outcome["selected"]["add_features"], bool)
+    assert isinstance(outcome["selected"]["drop_sensitive"], bool)
     assert str(mlflow_sqlite.get_model_version_by_alias(MODEL_NAME, CHALLENGER).version) == outcome["version"]
 
     model = mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}/{outcome['version']}")

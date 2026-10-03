@@ -255,6 +255,7 @@ def run_training(df: pd.DataFrame, params: dict) -> dict:
         cv = StratifiedKFold(train_p["cv_folds"], shuffle=True, random_state=seed)
         calibrated = CalibratedClassifierCV(fresh(), method="isotonic", cv=cv).fit(X_tr, y_tr)
         metrics, curve = evaluate(calibrated, X_te, y_te, econ)
+        metrics["test_churn_rate"] = float(y_te.mean())
         raw_proba = raw.predict_proba(X_te)[:, 1]
         metrics["brier_uncalibrated"] = brier_score_loss(y_te, raw_proba)
         mlflow.log_metrics(metrics)
@@ -298,6 +299,12 @@ def run_training(df: pd.DataFrame, params: dict) -> dict:
     return {
         **metrics,
         "baseline_pr_auc": baseline_pr_auc,
+        "selected": {
+            "model": best["model"],
+            "add_features": bool(best["add_features"]),
+            "drop_sensitive": bool(best["drop_sensitive"]),
+            "params": best_params,
+        },
         "passed": passed,
         "reasons": reasons,
         "version": str(info.registered_model_version) if passed else None,
@@ -308,10 +315,22 @@ def run_training(df: pd.DataFrame, params: dict) -> dict:
 def main() -> None:
     """DVC `train` stage."""
     outcome = run_training(pd.read_csv(PROCESSED_PATH), load_params())
-    metrics = {k: round(float(v), 4) for k, v in outcome.items() if isinstance(v, (float, np.floating))}
+    metrics = {
+        k: round(float(v), 4)
+        for k, v in outcome.items()
+        if isinstance(v, (float, np.floating))
+    }
+    summary = {
+        **metrics,
+        "selected": outcome["selected"],
+        "quality_gate_passed": outcome["passed"],
+        "gate_failures": outcome["reasons"],
+        "model_version": outcome["version"],
+        "run_id": outcome["run_id"],
+    }
     METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    METRICS_PATH.write_text(json.dumps(metrics, indent=2))
-    print(json.dumps(metrics, indent=2))
+    METRICS_PATH.write_text(json.dumps(summary, indent=2))
+    print(json.dumps(summary, indent=2))
     if not outcome["passed"]:
         print("Quality gate failed: " + "; ".join(outcome["reasons"]), file=sys.stderr)
         raise SystemExit(1)
