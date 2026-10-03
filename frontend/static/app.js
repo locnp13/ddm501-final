@@ -193,8 +193,10 @@ function renderResult(entry) {
       <p class="muted" style="margin:6px 0 0;font-size:13px">Dựa trên giả định chi phí, không phải số liệu thật.</p>
     </div>
     ${(entry.warnings ?? []).length ? `<div class="advice" style="background:var(--mid-bg)"><b>Lưu ý về dữ liệu nhập</b>${entry.warnings.map((w) => `<p style="margin:4px 0 0">${esc(w)}</p>`).join("")}<p class="muted" style="margin:6px 0 0;font-size:13px">Giá trị chưa từng xuất hiện khi huấn luyện, kết quả có thể kém tin cậy.</p></div>` : ""}
-    <p class="muted" style="margin:12px 0 0;font-size:12px">${modelInfo
-      ? `Model ${esc(modelInfo.name)} v${esc(modelInfo.version)} (${esc(modelInfo.alias)})` : "Model đang chạy"}</p>`;
+    <p class="muted" style="margin:12px 0 0;font-size:12px">${entry.modelVersion
+      ? `Model ${esc(modelInfo?.name ?? "churn-model")} v${esc(entry.modelVersion)}`
+      : (modelInfo ? `Model ${esc(modelInfo.name)} v${esc(modelInfo.version)} (${esc(modelInfo.alias)})` : "Model đang chạy")}
+      ${entry.requestId ? `<br>Mã yêu cầu: <span class="mono">${esc(entry.requestId)}</span>` : ""}</p>`;
 }
 
 // FastAPI returns 422 with one {loc, msg} per invalid field; show them by field label.
@@ -228,7 +230,14 @@ async function onSubmit(ev) {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(apiErrorMessage(res.status, body));
-    const entry = { time: Date.now(), probability: body.churn_probability, inputs, warnings: body.warnings ?? [] };
+    const entry = {
+      time: Date.now(),
+      probability: body.churn_probability,
+      modelVersion: body.model_version ?? null,
+      requestId: body.request_id ?? res.headers.get("X-Request-ID") ?? null,
+      inputs,
+      warnings: body.warnings ?? [],
+    };
     saveHistory(entry);
     renderResult(entry);
   } catch (err) {
@@ -262,6 +271,7 @@ function renderHistory() {
       <td>${new Date(it.time).toLocaleString("vi-VN")}</td>
       <td class="num">${pct(it.probability)}</td>
       <td><span class="badge ${lv.key}">${lv.label}</span></td>
+      <td class="mono">${it.modelVersion ? `v${esc(it.modelVersion)}` : "—"}</td>
       <td>${esc(labelOf(contract, it.inputs.Contract))}</td>
       <td class="num">${esc(it.inputs.tenure)}</td>
       <td class="num">${money(it.inputs.MonthlyCharges)}</td></tr>`;
@@ -284,8 +294,11 @@ $("#clear").addEventListener("click", () => {
 $("#export").addEventListener("click", () => {
   const items = loadHistory();
   if (!items.length) return;
-  const cols = ["time", "churn_probability", ...FIELDS.map((f) => f.name)];
-  const csv = [cols.join(","), ...items.map((it) => [new Date(it.time).toISOString(), it.probability, ...FIELDS.map((f) => it.inputs[f.name] ?? "")].join(","))].join("\n");
+  const cols = ["time", "churn_probability", "model_version", "request_id", ...FIELDS.map((f) => f.name)];
+  const csv = [cols.join(","), ...items.map((it) => [
+    new Date(it.time).toISOString(), it.probability, it.modelVersion ?? "", it.requestId ?? "",
+    ...FIELDS.map((f) => it.inputs[f.name] ?? ""),
+  ].join(","))].join("\n");
   const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "churn-predictions.csv" });
   a.click();
   URL.revokeObjectURL(a.href);
