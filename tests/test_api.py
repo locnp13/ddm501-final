@@ -1,4 +1,6 @@
 """API tests against a real (tiny) trained model in a temporary MLflow store."""
+from uuid import UUID
+
 import mlflow
 import pytest
 from fastapi.testclient import TestClient
@@ -54,6 +56,8 @@ def test_predict_returns_probability(client) -> None:
     res = client.post("/v1/predict", json=features())
     assert res.status_code == 200, res.text
     assert 0.0 <= res.json()["churn_probability"] <= 1.0
+    assert res.headers["X-Request-ID"] == res.json()["request_id"]
+    assert str(UUID(res.json()["request_id"])) == res.json()["request_id"]
 
 
 def test_predict_accepts_null_total_charges(client) -> None:

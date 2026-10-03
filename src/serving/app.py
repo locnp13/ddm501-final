@@ -7,6 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 import pandas as pd
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -134,6 +135,16 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def attach_request_id(request: Request, call_next):
+    """Give every response a request ID that can be shared when diagnosing a failure."""
+    request_id = str(uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     """Liveness/readiness probe; reports whether a model is loaded."""
@@ -162,7 +173,7 @@ async def count_validation_errors(request: Request, exc: RequestValidationError)
 
 
 @app.post("/v1/predict", response_model=PredictResponse)
-def predict(features: CustomerFeatures) -> PredictResponse:
+def predict(request: Request, features: CustomerFeatures) -> PredictResponse:
     """Return the calibrated churn probability for one customer.
 
     Missing fields, wrong types and out-of-range numbers are rejected with 422. A category never
@@ -187,6 +198,7 @@ def predict(features: CustomerFeatures) -> PredictResponse:
         CHURN_PROBABILITY.labels(version).observe(prob)
         REQUESTS.labels("predict", "200", version).inc()
         return PredictResponse(
+            request_id=request.state.request_id,
             churn_probability=prob,
             model_version=version if version != "unknown" else None,
             warnings=[f"{field}: unseen category {value!r}" for field, value in unknown],

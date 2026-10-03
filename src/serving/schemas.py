@@ -70,6 +70,7 @@ class CustomerFeatures(BaseModel):
 class PredictResponse(BaseModel):
     """Calibrated churn probability and anything the caller should double-check."""
 
+    request_id: str = Field(description="Unique identifier for tracing this prediction request")
     churn_probability: float = Field(ge=0, le=1)
     model_version: str | None = Field(description="Registry version of the champion model that answered")
     warnings: list[str] = Field(default_factory=list, description="Non-fatal issues, e.g. unseen categories")
