@@ -74,7 +74,7 @@ if ! kubectl --context "$PROFILE" -n "$NS" get secret churn-secrets >/dev/null 2
 fi
 if kubectl --context "$PROFILE" -n "$NS" get deploy api frontend grafana >/dev/null 2>&1; then
   echo "already deployed; waiting for pods"
-  for d in api frontend alert-hub alertmanager prometheus grafana; do
+  for d in api frontend alert-hub alertmanager prometheus grafana loki alloy; do
     kubectl --context "$PROFILE" -n "$NS" rollout status "deploy/$d" --timeout=300s
   done
 else

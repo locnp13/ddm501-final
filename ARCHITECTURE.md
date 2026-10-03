@@ -35,6 +35,8 @@ flowchart LR
     AM[Alertmanager]
     HUB[alert-hub]
     GF[Grafana]
+    AL[Alloy]
+    LK[(Loki)]
   end
   U([Người dùng]) --> ING
   ING -->|/| FE
@@ -46,6 +48,9 @@ flowchart LR
   ML --> PG
   ML --> MN
   API -->|nạp models:/churn-model@champion| ML
+  API -.->|log stdout| AL
+  AL -->|đẩy log| LK
+  GF -->|truy vấn log| LK
   PR -->|quét từng pod /metrics| API
   PR --> AM -->|webhook| HUB
   GF --> PR
@@ -71,7 +76,8 @@ CI/CD (không vẽ ở trên): `ci.yml` chạy lint, test, build trên mỗi pus
 | Giám sát drift | `src/serving/drift.py` | Đếm giá trị đầu vào theo bucket vào bộ đếm Prometheus | Không lưu giá trị thô |
 | Frontend | `frontend/` | UI tĩnh: Dự đoán, Lịch sử, Mô hình, Cảnh báo, Tài liệu; proxy `/api` | Không giữ trạng thái |
 | Alert hub | `src/alerts/hub.py` | Nhận webhook Alertmanager, giữ danh sách cho tab Cảnh báo | Không gửi ra ngoài; Telegram do Alertmanager gửi trực tiếp (tùy chọn) |
-| Giám sát | `k8s/monitoring/` | Prometheus, Alertmanager, Grafana (3 dashboard), 11 luật cảnh báo có `promtool test` | Chưa giám sát MLflow, MinIO, Postgres |
+| Giám sát | `k8s/monitoring/` | Prometheus, Alertmanager, Grafana (4 dashboard), 12 luật cảnh báo có `promtool test` | Chưa giám sát MLflow, MinIO, Postgres |
+| Log tập trung | `k8s/monitoring/loki*`, `alloy*` | Alloy đọc log mọi pod trong `churn` qua Kubernetes API, tách mức log và request id của API; Loki lưu 7 ngày; Grafana truy vấn | Không thu log của Compose (MLflow, MinIO, Postgres) |
 
 Ranh giới quan trọng: **mã phục vụ không được import `src.training.data`** (image API không có Pandera, test kiểm tra điều này), và schema Pandera `SCHEMA` phải khớp `CustomerFeatures` của API (một test kiểm tra).
 
@@ -157,6 +163,7 @@ API **không lưu** yêu cầu hay dự đoán. Dữ liệu duy nhất rời kh�
 | Đóng gói | Docker multi-stage, người dùng không phải root (uid 10001), HEALTHCHECK | Image nhỏ, ít bề mặt tấn công | |
 | Điều phối | Compose cho hạ tầng ML, Kubernetes (minikube) cho phục vụ | Compose đủ cho dịch vụ có trạng thái chạy một bản; K8s cho 2 bản sao API, readiness, canary, Ingress | Chạy tất cả trong Compose (không có canary, không có rolling update) |
 | Giám sát | Prometheus + Alertmanager + Grafana | Chuẩn thực tế; quét từng pod nên bộ đếm của các bản sao không bị trộn | Datadog/Cloud Monitoring (tính phí) |
+| Log tập trung | Alloy + Loki, truy vấn bằng Grafana | Loki chỉ đánh chỉ mục theo nhãn nên nhẹ hơn Elasticsearch; Alloy là agent thay Promtail (đã vào chế độ bảo trì) và đọc log qua Kubernetes API nên không cần hostPath | ELK/EFK (nặng bộ nhớ), chỉ dùng `kubectl logs` (mất log khi pod bị thay, không tìm kiếm được) |
 | Cảnh báo trên UI | alert-hub tự viết | Giao diện tĩnh không nhận được webhook, nên cần một bộ đệm | Dùng Grafana alerting (tách khỏi UI của sản phẩm) |
 | Lưu trữ | Postgres (metadata), MinIO (artifact, dữ liệu) | Tách metadata và file lớn; MinIO tương thích S3 nên chuyển sang S3 thật chỉ cần đổi endpoint | SQLite và đĩa cục bộ (không dùng chung được) |
 | CI/CD | GitHub Actions; deploy bằng self-hosted runner | Cụm chạy cục bộ, runner tự gọi ra GitHub nên không cần mở cổng | Deploy lên cloud (tốn tiền, ngoài phạm vi môn học) |
@@ -185,6 +192,8 @@ Toàn bộ chạy cục bộ nên chi phí tiền bằng 0, đổi lại là chi
 | Duyệt model bằng tay | Model xấu không tự lên production | Thêm một bước thủ công, chậm hơn CD thuần |
 | Feature engineering nằm trong pipeline | Không lệch giữa huấn luyện và phục vụ (training-serving skew) | Không dùng lại được feature cho model khác như với kho feature |
 | Hai môi trường (Compose + K8s) | Mỗi nơi làm đúng việc phù hợp | Hai bộ cấu hình, địa chỉ nối qua `host.minikube.internal` |
+| Log: nhãn thấp, request id làm metadata | Truy vấn nhanh theo `app`, `level`; vẫn lần theo được một request id | Không lọc nhanh theo giá trị hiếm như bằng chỉ mục toàn văn |
+| Alloy một bản sao, đọc log qua API | Không cần quyền hostPath, không gửi trùng | Một điểm đơn lẻ cho đường thu log |
 | Prometheus quét từng pod | Số liệu đúng theo bản sao và theo phiên bản | Cấu hình nhận diện pod qua annotation phức tạp hơn quét qua Service |
 | PSI trên cửa sổ 1 giờ | Phát hiện lệch đầu vào sớm, không lưu dữ liệu khách | Nhiễu khi ít lưu lượng (ngưỡng tối thiểu 100 dự đoán) |
 | Không lưu nhật ký dự đoán | Giữ riêng tư | Chưa đo được chất lượng thực tế, chưa A/B |

@@ -43,7 +43,7 @@ for dir in k8s/base k8s/monitoring; do
 done
 
 echo "== Waiting for the rollout"
-for d in api frontend alert-hub alertmanager prometheus grafana; do
+for d in api frontend alert-hub alertmanager prometheus grafana loki alloy; do
   kubectl --context "$PROFILE" -n "$NS" rollout status "deploy/$d" --timeout=300s
 done
 
@@ -67,6 +67,15 @@ echo "$targets"
 [[ "$targets" == *'"value":['*',"2"]'* || "$targets" == *'"value":['*',"3"]'* ]] \
   || { echo "ERROR: Prometheus does not see the expected API pods up"; exit 1; }
 kubectl --context "$PROFILE" -n "$NS" exec deploy/frontend -- wget -qO- http://alert-hub:8080/healthz
+
+echo "== Smoke test: Alloy ships the API logs to Loki"
+for _ in $(seq 1 30); do
+  apps="$(kubectl --context "$PROFILE" -n "$NS" exec deploy/frontend -- wget -qO- http://loki:3100/loki/api/v1/label/app/values 2>/dev/null || true)"
+  [[ "$apps" == *'"api"'* ]] && break
+  sleep 2
+done
+echo "$apps"
+[[ "$apps" == *'"api"'* ]] || { echo "ERROR: Loki has no logs from the API (check deploy/alloy and deploy/loki)"; exit 1; }
 
 echo "== Removing old images (keeping the 3 newest besides $TAG)"
 docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^churn-(api|frontend):' | grep -v -E ":($TAG|dev)$" \

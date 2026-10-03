@@ -19,7 +19,7 @@ docker build -t churn-frontend:dev -f frontend/Dockerfile frontend
 kubectl apply -f k8s/base/namespace.yaml
 kubectl -n churn create secret generic churn-secrets --from-env-file=.env   # cần ADMIN_KEY và GRAFANA_ADMIN_PASSWORD; TELEGRAM_BOT_TOKEN và TELEGRAM_CHAT_ID là tùy chọn
 kubectl apply -k k8s/base
-kubectl apply -k k8s/monitoring    # Prometheus, Alertmanager, Grafana, alert-hub
+kubectl apply -k k8s/monitoring    # Prometheus, Alertmanager, Grafana, Loki, Alloy, alert-hub
 kubectl -n churn rollout status deploy/api
 
 # Mở giao diện: http://localhost:8088
@@ -64,7 +64,7 @@ cd ~/actions-runner-ddm501
 | `Deployment/api` (2 bản sao) | Phục vụ model `@champion`, `MODEL_POLL_SECONDS=30` để các bản sao đồng bộ sau khi duyệt hoặc khôi phục |
 | `Deployment/frontend` | Giao diện web (nginx) |
 | `Ingress` | Trình duyệt chỉ nói chuyện với Ingress: `/api/*` đi vào API (bỏ tiền tố `/api`), còn lại vào giao diện. Ingress không ràng buộc host nên mở được bằng `localhost` |
-| `k8s/monitoring/` | Prometheus (có PVC 2 GiB, giữ 7 ngày), Alertmanager, Grafana, alert-hub, Role chỉ đọc pod trong namespace `churn` cho Prometheus. Truy cập qua `/prometheus/`, `/alertmanager/`, `/grafana/`; webhook của hub **không** mở ra ngoài, Ingress chỉ cho `GET /hub/alerts` |
+| `k8s/monitoring/` | Prometheus (có PVC 2 GiB, giữ 7 ngày), Alertmanager, Grafana, Loki (PVC 2 GiB, giữ 7 ngày), Alloy (Role đọc pod và `pods/log` trong namespace `churn`), alert-hub, Role chỉ đọc pod cho Prometheus. Truy cập qua `/prometheus/`, `/alertmanager/`, `/grafana/`; webhook của hub **không** mở ra ngoài, Ingress chỉ cho `GET /hub/alerts` |
 | `Service/api-admin` | Cùng các pod stable, dùng riêng cho `/api/v1/model/promote` và `/rollback` (xem bên dưới) |
 
 ## Canary
@@ -84,4 +84,5 @@ kubectl delete -k k8s/canary                 # gỡ canary
 - **Prometheus trong cụm quét từng pod** (kể cả pod canary, nhãn `track=canary`) nhờ annotation `prometheus.io/*`; dashboard "So sánh phiên bản" tách số liệu theo `model_version`.
 - ConfigMap của giám sát được sinh bằng kustomize và phải khai báo `namespace: churn`, nếu không chúng rơi vào namespace `default` và pod không tìm thấy (đã gặp khi triển khai).
 - Dữ liệu Prometheus nằm trong PVC của minikube: mất nếu xóa cụm. Trạng thái Alertmanager (silence) và thay đổi trong giao diện Grafana nằm trong `emptyDir`, mất khi pod khởi động lại; dashboard thì lấy từ repo nên luôn được dựng lại.
+- **Log**: Alloy (một bản, đọc log qua Kubernetes API nên không cần hostPath) đẩy log mọi pod trong `churn` sang Loki; Grafana đọc Loki ở dashboard **Churn: Log**. Loki và Alloy không bao giờ thu log của chính chúng. Dữ liệu Loki nằm trong PVC: mất nếu xóa cụm.
 - `kubectl config` chuyển sang context `churn`. Context `minikube` cũ trong kubeconfig trỏ tới cụm không còn tồn tại và không bị đụng tới.

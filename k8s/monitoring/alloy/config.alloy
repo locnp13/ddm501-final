@@ -1,0 +1,79 @@
+// Collects the logs of every pod in the churn namespace through the Kubernetes API and pushes them to Loki.
+// Needs no access to the node's files, only the pods/log permission in alloy.yaml.
+
+discovery.kubernetes "pods" {
+	role = "pod"
+
+	namespaces {
+		names = ["churn"]
+	}
+}
+
+discovery.relabel "pods" {
+	targets = discovery.kubernetes.pods.targets
+
+	// The log pipeline does not collect its own logs.
+	rule {
+		source_labels = ["__meta_kubernetes_pod_label_app"]
+		regex         = "loki|alloy"
+		action        = "drop"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_namespace"]
+		target_label  = "namespace"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_label_app"]
+		target_label  = "app"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_name"]
+		target_label  = "pod"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_container_name"]
+		target_label  = "container"
+	}
+}
+
+loki.source.kubernetes "pods" {
+	targets    = discovery.relabel.pods.output
+	forward_to = [loki.process.api.receiver]
+}
+
+// API lines look like: 2026-10-03 05:29:53,756 INFO churn-api [demo-1] POST /v1/predict -> 200 ...
+// The level becomes a label (a handful of values); the request id is structured metadata, because it
+// has too many values to be a label.
+loki.process "api" {
+	forward_to = [loki.write.loki.receiver]
+
+	stage.match {
+		selector = "{app=\"api\"}"
+
+		stage.regex {
+			expression = "^\\S+ \\S+ (?P<level>[A-Z]+) \\S+ \\[(?P<request_id>[^\\]]*)\\]"
+		}
+
+		stage.labels {
+			values = {
+				level = "",
+			}
+		}
+
+		stage.structured_metadata {
+			values = {
+				request_id = "",
+			}
+		}
+	}
+}
+
+loki.write "loki" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}

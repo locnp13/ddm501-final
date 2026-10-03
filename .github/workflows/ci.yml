@@ -24,6 +24,8 @@ jobs:
           $prom check config /etc/prometheus/prometheus.yml
           $prom test rules alerts_test.yml
           docker run --rm --entrypoint amtool -v "$PWD/k8s/monitoring/alertmanager:/cfg" prom/alertmanager:v0.27.0 check-config /cfg/alertmanager.yml
+          docker run --rm -v "$PWD/k8s/monitoring/loki:/cfg" grafana/loki:3.3.2 -config.file=/cfg/loki.yaml -verify-config
+          docker run --rm -v "$PWD/k8s/monitoring/alloy:/cfg" grafana/alloy:v1.5.1 fmt /cfg/config.alloy > /dev/null
           for f in k8s/monitoring/grafana/dashboards/*.json; do python -m json.tool "$f" > /dev/null; done
           for dir in k8s/base k8s/monitoring k8s/canary; do kubectl kustomize "$dir" > /dev/null; done
 
