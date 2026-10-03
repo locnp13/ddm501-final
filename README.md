@@ -181,7 +181,7 @@ Giám sát không đo được độ chính xác thật của model vì nhãn ch
 docker compose run --rm trainer pytest          # unit + data-quality + model-gate
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) chạy khi push lên `main` và khi mở PR: `ruff` -> `pytest` với coverage -> build image API (đẩy lên GHCR khi merge vào `main`).
+GitHub Actions (`.github/workflows/ci.yml`) chạy khi push lên `main` và khi mở PR: `ruff` -> `pytest` với coverage (bắt buộc từ 80% trở lên, dưới ngưỡng thì CI đỏ) -> build image API (đẩy lên GHCR khi merge vào `main`).
 
 ## Cấu trúc thư mục
 
@@ -201,7 +201,7 @@ docs/             hướng dẫn triển khai và vận hành, sơ đồ luồng
 
 Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-model` v3 là champion, API chạy trên Kubernetes). Các câu hỏi cần nhóm chốt: [`docs/open-questions.md`](docs/open-questions.md).
 
-Đã có: pipeline huấn luyện, API có kiểm tra đầu vào và duyệt/khôi phục model, giao diện web, giám sát (Prometheus, Alertmanager, 3 dashboard Grafana, 11 luật cảnh báo có test) trên Kubernetes, CI lint/test/build/kiểm tra cấu hình giám sát, test API (coverage khoảng 90%).
+Đã có: pipeline huấn luyện, API có kiểm tra đầu vào và duyệt/khôi phục model, giao diện web, giám sát (Prometheus, Alertmanager, 3 dashboard Grafana, 11 luật cảnh báo có test) trên Kubernetes, CI lint/test/build/kiểm tra cấu hình giám sát, test API (coverage 91% đo ngày 2026-10-03, 96 test; CI từ chối nếu dưới 80%).
 
 Chưa hoàn thành (theo yêu cầu đề bài):
 
