@@ -34,7 +34,7 @@ from src.training.registry import CHALLENGER, MODEL_NAME, champion_pr_auc, passe
 EXPERIMENT = "churn-prediction"
 REPORT_PATH = Path("reports/drift.html")
 METRICS_PATH = Path("reports/metrics.json")
-XGB_DEFAULTS = {"n_estimators": 300, "max_depth": 4, "learning_rate": 0.05}
+XGB_DEFAULTS = {"n_estimators": 350, "max_depth": 4, "learning_rate": 0.045}
 
 
 def make_estimator(name: str, seed: int, scale_pos_weight: float = 1.0, **params):
