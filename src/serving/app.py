@@ -21,7 +21,16 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, ge
 
 from src.serving.drift import FEATURE_BASELINE, load_profile
 from src.serving.model_info import FIGURES, list_versions, load_figure, load_model_info, parse_model_uri
-from src.serving.schemas import EXAMPLE, CustomerFeatures, PredictResponse, VersionRequest, unknown_categories
+from src.serving.schemas import (
+    EXAMPLE,
+    BatchItem,
+    BatchRequest,
+    BatchResponse,
+    CustomerFeatures,
+    PredictResponse,
+    VersionRequest,
+    unknown_categories,
+)
 from src.training.registry import CHALLENGER, CHAMPION, MODEL_NAME
 
 logger = logging.getLogger("churn-api")
@@ -76,6 +85,9 @@ ADMIN_ACTIONS = Counter(
     "churn_admin_actions_total",
     "Model approval and rollback attempts by outcome (ok, denied, failed)",
     ["action", "result"],
+)
+BATCH_SIZE = Histogram(
+    "churn_batch_size", "Customers per /v1/predict/batch call", buckets=[1, 10, 50, 100, 250, 500, 1000]
 )
 UNKNOWN_CATEGORY = Counter(
     "churn_unknown_category_total", "Requests with a category never seen in training", ["field"]
@@ -235,6 +247,32 @@ async def count_validation_errors(request: Request, exc: RequestValidationError)
     return await request_validation_exception_handler(request, exc)
 
 
+def _score(customers: list[CustomerFeatures], version: str) -> list[tuple[float, list[str]]]:
+    """Score customers with the served model and record per-customer monitoring.
+
+    Returns (probability, warnings) for each customer, in order. Raises 503 when no model is loaded.
+    """
+    if state["model"] is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    rows = [c.model_dump() for c in customers]
+    frame = pd.DataFrame(rows).astype({"TotalCharges": "float64"})
+    probs = [float(p) for p in state["model"].predict(frame)]
+    results = []
+    for customer, row, prob in zip(customers, rows, probs):
+        unknown = unknown_categories(customer)
+        for field, _ in unknown:
+            UNKNOWN_CATEGORY.labels(field).inc()
+        if state["profile"] is not None:
+            try:
+                state["profile"].observe(row)
+            except Exception as exc:  # monitoring must never break a prediction
+                logger.warning("Could not record feature drift metrics: %s", exc)
+        PREDICTIONS.labels("churn" if prob >= 0.5 else "stay", version).inc()
+        CHURN_PROBABILITY.labels(version).observe(prob)
+        results.append((prob, [f"{field}: unseen category {value!r}" for field, value in unknown]))
+    return results
+
+
 @app.post("/v1/predict", response_model=PredictResponse)
 def predict(features: CustomerFeatures) -> PredictResponse:
     """Return the calibrated churn probability for one customer.
@@ -245,25 +283,10 @@ def predict(features: CustomerFeatures) -> PredictResponse:
     start = time.perf_counter()
     version = served_version()
     try:
-        if state["model"] is None:
-            raise HTTPException(status_code=503, detail="Model not loaded")
-        frame = pd.DataFrame([features.model_dump()]).astype({"TotalCharges": "float64"})
-        prob = float(state["model"].predict(frame)[0])
-        unknown = unknown_categories(features)
-        for field, _ in unknown:
-            UNKNOWN_CATEGORY.labels(field).inc()
-        if state["profile"] is not None:
-            try:
-                state["profile"].observe(features.model_dump())
-            except Exception as exc:  # monitoring must never break a prediction
-                logger.warning("Could not record feature drift metrics: %s", exc)
-        PREDICTIONS.labels("churn" if prob >= 0.5 else "stay", version).inc()
-        CHURN_PROBABILITY.labels(version).observe(prob)
+        prob, warnings = _score([features], version)[0]
         REQUESTS.labels("predict", "200", version).inc()
         return PredictResponse(
-            churn_probability=prob,
-            model_version=version if version != "unknown" else None,
-            warnings=[f"{field}: unseen category {value!r}" for field, value in unknown],
+            churn_probability=prob, model_version=version if version != "unknown" else None, warnings=warnings
         )
     except HTTPException as exc:
         REQUESTS.labels("predict", str(exc.status_code), version).inc()
@@ -274,6 +297,36 @@ def predict(features: CustomerFeatures) -> PredictResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
         LATENCY.labels("predict", version).observe(time.perf_counter() - start)
+
+
+@app.post("/v1/predict/batch", response_model=BatchResponse)
+def predict_batch(body: BatchRequest) -> BatchResponse:
+    """Score 1 to 1000 customers in one call, e.g. the list the retention team works through each week.
+
+    The whole batch is validated first: one invalid customer rejects the call with 422, and the error
+    names its position (`customers.<index>.<field>`). Results come back in the order sent, all from
+    the same model version. Every customer counts in the same monitoring metrics as /v1/predict.
+    """
+    start = time.perf_counter()
+    version = served_version()
+    try:
+        results = _score(body.customers, version)
+        BATCH_SIZE.observe(len(results))
+        REQUESTS.labels("predict/batch", "200", version).inc()
+        return BatchResponse(
+            predictions=[BatchItem(churn_probability=p, warnings=w) for p, w in results],
+            count=len(results),
+            model_version=version if version != "unknown" else None,
+        )
+    except HTTPException as exc:
+        REQUESTS.labels("predict/batch", str(exc.status_code), version).inc()
+        raise
+    except Exception as exc:
+        REQUESTS.labels("predict/batch", "500", version).inc()
+        logger.exception("Batch prediction failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        LATENCY.labels("predict/batch", version).observe(time.perf_counter() - start)
 
 
 @app.get("/v1/model")

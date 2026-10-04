@@ -245,8 +245,8 @@ Kiểm tra thủ công trong cụm: `kubectl -n churn exec deploy/frontend -- wg
 - **Runner trên repo công khai** vẫn là rủi ro: PR từ người ngoài phải được duyệt trước khi chạy CI, và workflow deploy chỉ chạy tay, nhưng nếu một thành viên duyệt nhầm PR độc hại thì mã của nó chạy trên máy này. `main` chưa bật bảo vệ nhánh.
 - **Canary và A/B chưa nối với luồng duyệt model.** A/B còn thiếu mã khách hàng trong request và nhật ký dự đoán (xem `rollout-strategies.md`).
 - **Postgres, MinIO, MLflow chưa chạy trong cụm**; image MinIO là bản đóng băng (`bitnamilegacy`). Chưa có sao lưu volume Docker: mất volume là mất model.
-- **Mật khẩu mặc định** của MinIO, Grafana, Postgres vẫn nằm trong `docker-compose.yml` (Q20 chưa chuyển hết sang `.env`); mới có `ADMIN_KEY`.
-- SHAP/LIME, phân tích công bằng, endpoint `/v1/predict/batch` chưa làm.
+- **Mật khẩu mặc định của MinIO và Postgres** giờ đọc từ `.env` (`MINIO_ROOT_*`, `POSTGRES_*`, xem `.env.example`), nhưng nếu để trống thì vẫn quay về giá trị mặc định cũ (`minioadmin`, `mlflow`) để không làm hỏng volume đang chạy. Máy dùng chung phải đặt giá trị riêng; đổi mật khẩu Postgres của volume có sẵn cần `ALTER USER` trước (hướng dẫn trong `.env.example`). Grafana đã dùng `GRAFANA_ADMIN_PASSWORD`.
+- Báo cáo Responsible AI (`python -m src.responsible.report`) chạy tay sau khi duyệt model, chưa tự động; ngưỡng theo nhóm để giảm thiên lệch chưa bật (`docs/responsible-ai.md`, mục 3.5).
 - Các tình huống lỗi đánh dấu "Chưa" ở mục 4 chưa được thử thật.
 
 Về giám sát cụ thể:

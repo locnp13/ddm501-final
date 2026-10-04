@@ -2,13 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: mlflow
-      POSTGRES_PASSWORD: mlflow
+      # Read from .env (see .env.example); the defaults keep existing volumes working. Postgres only applies
+      # these when it initialises an empty volume: to change the password of an existing one, see .env.example.
+      POSTGRES_USER: ${POSTGRES_USER:-mlflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlflow}
       POSTGRES_DB: mlflow
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mlflow"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-mlflow} -d mlflow"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -37,7 +39,7 @@ services:
       dockerfile: deploy/Dockerfile.mlflow
     command: >
       mlflow server --host 0.0.0.0 --port 5000
-      --backend-store-uri postgresql://mlflow:mlflow@postgres:5432/mlflow
+      --backend-store-uri postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/mlflow
       --artifacts-destination s3://mlflow --serve-artifacts
     environment:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000

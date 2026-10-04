@@ -6,7 +6,7 @@ Tài liệu ghi vai trò và trách nhiệm của từng thành viên, cùng quy
 
 | Thành viên | Mã SV | Vai trò | Trách nhiệm |
 |---|---|---|---|
-| Nguyễn Thị Hồng Hạnh | 25MS13316 | Logic bài toán và CI/CD | Nghiên cứu logic bài toán churn: bối cảnh, giả định kinh tế, metric. Thiết kế luồng CI/CD. |
+| Nguyễn Thị Hồng Hạnh | 25MS13316 | Logic bài toán, CI/CD và Responsible AI | Nghiên cứu logic bài toán churn: bối cảnh, giả định kinh tế, metric. Thiết kế luồng CI/CD. Phân tích Responsible AI (giải thích mô hình, công bằng, quyền riêng tư, đạo đức). |
 | Chu Đức Bình | 25MS13303 | Kiến trúc MLOps | Thiết kế kiến trúc luồng MLOps, xác định các yêu cầu hệ thống cần đáp ứng, chọn tech stack và phân tích đánh đổi. |
 | Phạm Văn Duy Khánh | 25MS13313 | Frontend, backend, serving | Viết code giao diện web, backend và serving API. |
 | Nguyễn Phúc Lộc | 25MS13314 | Vận hành production, giám sát và cảnh báo | Triển khai môi trường production, vận hành (operation), giám sát (monitor) và cảnh báo (alert). |
@@ -17,6 +17,9 @@ Tài liệu ghi vai trò và trách nhiệm của từng thành viên, cùng quy
 |---|---|---|
 | Hạnh | Logic bài toán, giả định kinh tế, metric | `docs/open-questions.md` (Q1-Q5), `docs/spec-churn-training-pipeline.md` |
 | Hạnh | Luồng CI/CD | `.github/workflows/ci.yml`, `.github/workflows/deploy.yml`, `docs/rollout-strategies.md` |
+| Hạnh | Responsible AI: SHAP, LIME, công bằng, giảm thiên lệch, quyền riêng tư, đạo đức | `src/responsible/`, `docs/responsible-ai.md`, `reports/responsible_ai/`, `tests/test_responsible.py` |
+| Hạnh | Dự đoán theo lô (`/v1/predict/batch`, phần serving của Khánh, Khánh review) | `src/serving/app.py`, `src/serving/schemas.py`, `tests/test_batch.py` |
+| Hạnh | Mô phỏng lưu lượng để demo giám sát (Q17, Lộc review) | `src/simulation/traffic.py`, `tests/test_simulation.py` |
 | Bình | Kiến trúc và luồng dữ liệu, tech stack, trade-off | `ARCHITECTURE.md`, `docs/mlops-flow.html` |
 | Bình | Yêu cầu hệ thống | `ARCHITECTURE.md` (mục 1), `README.md` (phần Bài toán) |
 | Khánh | Frontend | `frontend/` |
@@ -32,7 +35,6 @@ Một số hạng mục có liên quan chéo: phần giám sát cần Khánh xu�
 Các phần sau trong đề bài chưa nằm trong phân công trên và cần được gán trước khi nộp:
 
 - Pipeline huấn luyện và thực nghiệm (`src/training/`, MLflow, DVC).
-- Responsible AI: phân tích công bằng, SHAP/LIME, quyền riêng tư, đạo đức.
 - Test: coverage, data quality, model validation.
 - Slide và kịch bản demo.
 
