@@ -114,6 +114,15 @@ curl -X POST http://localhost:8088/api/v1/predict \
 
 Khi chưa có model mang alias `champion`, `/v1/predict` trả `503 Model not loaded`. Đây là hành vi có chủ đích.
 
+**Dự đoán hàng loạt** (`POST /v1/predict/batch`): gửi 1 đến 1.000 khách trong một lần gọi, ví dụ danh sách bộ phận chăm sóc cần xử lý trong tuần. Kết quả trả theo đúng thứ tự gửi, cùng một phiên bản model; mỗi khách có `warnings` riêng. Chỉ cần một khách sai là cả lô bị từ chối (`422`), và lỗi chỉ rõ vị trí, ví dụ `customers.1.tenure`. Mỗi khách trong lô được tính vào cùng các metric giám sát như `/v1/predict` (kể cả drift PSI); kích thước lô có metric riêng `churn_batch_size`.
+
+```bash
+curl -X POST http://localhost:8088/api/v1/predict/batch \
+  -H "Content-Type: application/json" \
+  -d '{"customers": [ {...khách 1...}, {...khách 2...} ]}'
+# ví dụ đầu ra: {"predictions": [{"churn_probability": 0.71, "warnings": []}, ...], "count": 2, "model_version": "3"}
+```
+
 **Kiểm tra đầu vào** (schema Pydantic, ví dụ có sẵn trong Swagger): thiếu trường, sai kiểu hoặc số ngoài dải (`tenure` 0-120, `MonthlyCharges` >= 0, `SeniorCitizen` 0/1) trả `422` kèm trường lỗi; `TotalCharges` được phép `null` (khách mới). Giá trị phân loại chưa từng thấy khi huấn luyện (ví dụ `PaymentMethod: "Momo"`) vẫn được dự đoán, phản hồi có `warnings` và metric `churn_unknown_category_total` tăng. Phản hồi gồm `churn_probability`, `model_version`, `warnings`.
 
 API còn có `GET /v1/model/versions` (lịch sử mọi phiên bản) và `POST /v1/model/rollback` (quay về bản cũ, cùng khóa quản trị; model được nạp và chạy thử trước khi đổi). Tab Mô hình của giao diện web có bảng lịch sử và nút Khôi phục. Cấu hình `MODEL_URI=models:/churn-model/3` ghim một phiên bản và `MODEL_POLL_SECONDS=30` cho API theo dõi alias; xem [`docs/rollout-strategies.md`](docs/rollout-strategies.md) (canary, A/B trên Kubernetes). API còn có `GET /v1/model/challenger` và `POST /v1/model/promote` (duyệt model: cần header `X-Admin-Key`, chỉ duyệt đúng bản đang là `challenger`, nạp thử model trước khi đổi alias, và phục vụ ngay không cần restart; tắt nếu `ADMIN_KEY` rỗng), `GET /v1/model` (phiên bản, chỉ số, cấu hình được chọn, nguồn gốc, đường cong lợi nhuận, so sánh cấu hình) và `GET /v1/model/figures/{calibration.png|profit_curve.png}`; giao diện web dùng các endpoint này.
@@ -210,7 +219,6 @@ Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-
 
 Chưa hoàn thành (theo yêu cầu đề bài):
 
-- [ ] Endpoint `/v1/predict/batch` (schema chặt và ví dụ OpenAPI đã có cho `/v1/predict`)
 - [ ] Giải thích mô hình (SHAP, LIME)
 - [ ] Giảm thiểu thiên lệch (fairness): đã đo chênh lệch tỷ lệ được chọn theo `gender` và `SeniorCitizen`, chưa có biện pháp giảm
 - [ ] Tài liệu privacy và ethics

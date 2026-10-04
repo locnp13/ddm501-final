@@ -80,6 +80,33 @@ def unknown_categories(features: CustomerFeatures) -> list[tuple[str, str]]:
     return [(f, getattr(features, f)) for f, known in KNOWN_CATEGORIES.items() if getattr(features, f) not in known]
 
 
+MAX_BATCH = 1000  # rows per /v1/predict/batch call; larger jobs should be split by the caller
+
+
+class BatchRequest(BaseModel):
+    """Several customers scored in one call, e.g. a nightly list for the retention team."""
+
+    model_config = ConfigDict(json_schema_extra={"examples": [{"customers": [EXAMPLE, {**EXAMPLE, "tenure": 60,
+                                                                                         "Contract": "Two year"}]}]})
+
+    customers: list[CustomerFeatures] = Field(min_length=1, max_length=MAX_BATCH, description="1 to 1000 customers")
+
+
+class BatchItem(BaseModel):
+    """Result for one customer of a batch, in the order they were sent."""
+
+    churn_probability: float = Field(ge=0, le=1)
+    warnings: list[str] = Field(default_factory=list, description="Non-fatal issues for this customer")
+
+
+class BatchResponse(BaseModel):
+    """Scores for every customer of the batch, all from the same model version."""
+
+    predictions: list[BatchItem]
+    count: int = Field(description="Number of customers scored")
+    model_version: str | None = Field(description="Registry version of the champion model that answered")
+
+
 class VersionRequest(BaseModel):
     """The registry version an approver or a rollback refers to."""
 

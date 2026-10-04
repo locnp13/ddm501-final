@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Git repo (origin `github.com/locnp13/ddm501-final`, branch `main`). Training pipeline, API skeleton, Compose stack and CI exist; see `README.md` for status and `docs/open-questions.md` for undecided points. Still missing: SHAP/LIME, fairness analysis, batch endpoint, CI deploy step.
+Git repo (origin `github.com/locnp13/ddm501-final`, branch `main`). Training pipeline, API skeleton, Compose stack and CI exist; see `README.md` for status and `docs/open-questions.md` for undecided points. Still missing: SHAP/LIME, fairness analysis, CI deploy step.
 
 ## Commands
 
@@ -25,7 +25,7 @@ Monitoring lives in `k8s/monitoring/` (Prometheus scraping each API pod via pod 
 Deployment topology, the deploy/model lifecycle flows, operations and known gaps are in `docs/deployment-guide.md`; keep it current when those change.
 
 
-`src/training/data.py` (download, Pandera schema, clean) -> `features.py` (in-pipeline feature engineering), `business.py` (profit/Recall@k), `registry.py` (gate, aliases, provenance), `train.py` (CV comparison, Optuna, isotonic calibration, MLflow logging, Evidently report) -> `model.py` (pyfunc wrapper returning P(churn)). `src/serving/app.py` loads `models:/churn-model@champion` and exposes `/v1/predict` (input validated by `src/serving/schemas.py`; keep it in sync with the Pandera `SCHEMA`, a test checks this), `/v1/model`, `/health`, `/metrics`. `frontend/` is an nginx container serving a static UI (plain HTML/CSS/JS) that calls the API through its `/api` proxy; `src/serving/model_info.py` builds the model description the UI shows from the MLflow registry. MLflow metadata is in Postgres and artifacts in MinIO (`mlflow` bucket). Pin xgboost/scikit-learn identically in `requirements.txt` (API) and `requirements-train.txt` (trainer) or the model will not load.
+`src/training/data.py` (download, Pandera schema, clean) -> `features.py` (in-pipeline feature engineering), `business.py` (profit/Recall@k), `registry.py` (gate, aliases, provenance), `train.py` (CV comparison, Optuna, isotonic calibration, MLflow logging, Evidently report) -> `model.py` (pyfunc wrapper returning P(churn)). `src/serving/app.py` loads `models:/churn-model@champion` and exposes `/v1/predict` and `/v1/predict/batch` (input validated by `src/serving/schemas.py`; keep it in sync with the Pandera `SCHEMA`, a test checks this), `/v1/model`, `/health`, `/metrics`. `frontend/` is an nginx container serving a static UI (plain HTML/CSS/JS) that calls the API through its `/api` proxy; `src/serving/model_info.py` builds the model description the UI shows from the MLflow registry. MLflow metadata is in Postgres and artifacts in MinIO (`mlflow` bucket). Pin xgboost/scikit-learn identically in `requirements.txt` (API) and `requirements-train.txt` (trainer) or the model will not load.
 
 ## What the project is
 
