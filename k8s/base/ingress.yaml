@@ -35,6 +35,8 @@ spec:
 ---
 # Admin actions (approve, rollback) always go to the stable pods: a canary is pinned to one version and
 # refuses them. They use the api-admin Service because canary splitting is per Service, not per path.
+# A rollback runs as a job in one pod, so its status is polled here as well and one client always reaches
+# the same pod (ingress-nginx talks to pod endpoints, so a Service's sessionAffinity would not apply).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -43,12 +45,13 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /v1/model/$1
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
 spec:
   ingressClassName: nginx
   rules:
     - http:
         paths:
-          - path: /api/v1/model/(promote|rollback)
+          - path: /api/v1/model/(promote|rollback|jobs/[0-9a-f]+)
             pathType: ImplementationSpecific
             backend:
               service: {name: api-admin, port: {name: http}}

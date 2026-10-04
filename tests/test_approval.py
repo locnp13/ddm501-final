@@ -1,4 +1,6 @@
 """Approving a challenger through the API. Tests share one store and run in order: the last one promotes."""
+import time
+
 import mlflow
 import pytest
 from fastapi.testclient import TestClient
@@ -111,20 +113,34 @@ def test_rollback_needs_the_key_and_a_real_other_version(client, pending) -> Non
     assert 'churn_admin_actions_total{action="rollback",result="failed"} 2.0' in client.get("/metrics").text
 
 
+def wait_for_job(client, res) -> dict:
+    """Rollback answers 202 with a job; poll it until it stops running."""
+    assert res.status_code == 202, res.text
+    job = res.json()
+    for _ in range(300):
+        job = client.get(f"/v1/model/jobs/{job['id']}").json()
+        if job["status"] != "running":
+            return job
+        time.sleep(0.1)
+    raise AssertionError(f"job still running: {job}")
+
+
 def test_incompatible_version_is_refused_and_nothing_changes(client, pending, monkeypatch) -> None:
     class Broken:
         def predict(self, _):
             raise ValueError("columns do not match")
 
     monkeypatch.setattr(mlflow.pyfunc, "load_model", lambda uri: Broken())
-    res = client.post("/v1/model/rollback", json={"version": "1"}, headers={"X-Admin-Key": KEY})
-    assert res.status_code == 422 and "nothing changed" in res.json()["detail"]
+    job = wait_for_job(client, client.post("/v1/model/rollback", json={"version": "1"}, headers={"X-Admin-Key": KEY}))
+    assert job["status"] == "failed" and job["http_status"] == 422 and "nothing changed" in job["error"]
     assert alias_version(pending, CHAMPION) == "2"
 
 
 def test_rollback_serves_the_older_version_at_once(client, pending) -> None:
     res = client.post("/v1/model/rollback", json={"version": "1"}, headers={"X-Admin-Key": KEY})
-    assert res.status_code == 200, res.text
+    job = wait_for_job(client, res)
+    assert job["status"] == "ok" and job["progress"] == len(job["steps"]) and job["result"]["version"] == "1"
+    assert client.get("/v1/model/jobs/nope").status_code == 404
     assert alias_version(pending, CHAMPION) == "1"
     assert "restored_at" in pending.get_model_version(MODEL_NAME, "1").tags
     assert client.post("/v1/predict", json=features()).json()["model_version"] == "1"

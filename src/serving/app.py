@@ -9,7 +9,7 @@ import uuid
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -337,24 +337,29 @@ def _require_admin(key: str | None, action: str) -> None:
         )
 
 
-def _activate(client: MlflowClient, version: str, kind: str, tag: str) -> dict[str, Any]:
+def _activate(
+    client: MlflowClient, version: str, kind: str, tag: str, progress: Callable[[str], None] = lambda step: None
+) -> dict[str, Any]:
     """Serve `version` and make it the champion. The registry is only touched after the model proved usable.
 
     The model must load and score a sample customer with the current API schema; otherwise
-    nothing changes. Caller holds `promote_lock`.
+    nothing changes. Caller holds `promote_lock`. `progress` is told the step about to start.
     """
     import mlflow.pyfunc
 
+    progress("load")
     try:
         model = mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}/{version}")
         info = load_model_info(f"models:/{MODEL_NAME}/{version}")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"v{version} cannot be loaded, nothing changed: {exc}") from exc
+    progress("check")
     try:
         model.predict(pd.DataFrame([EXAMPLE]).astype({"TotalCharges": "float64"}))
     except Exception as exc:
         detail = f"v{version} does not accept the current input schema, nothing changed: {exc}"
         raise HTTPException(status_code=422, detail=detail) from exc
+    progress("switch")
     client.set_registered_model_alias(MODEL_NAME, CHAMPION, version)
     try:
         if str(client.get_model_version_by_alias(MODEL_NAME, CHALLENGER).version) == version:
@@ -400,16 +405,72 @@ def approve_challenger(body: VersionRequest, x_admin_key: str | None = Header(de
         return _activate(client, body.version, "approve", "approved_at")
 
 
-@app.post("/v1/model/rollback")
+# A rollback loads a model and can take over a minute, longer than a proxy waits, so it runs as a job
+# the UI polls. Jobs live in this pod's memory; the api-admin Service keeps one client on one pod.
+ROLLBACK_STEPS = {
+    "load": "Tải model từ registry",
+    "check": "Chấm điểm thử một khách hàng mẫu",
+    "switch": "Đổi alias champion và nạp baseline drift",
+}
+jobs: dict[str, dict[str, Any]] = {}
+MAX_JOBS = 20
+
+
+def _run_rollback(job: dict[str, Any], version: str) -> None:
+    """Body of the rollback thread: record each step and the outcome on `job`."""
+
+    def progress(step: str) -> None:
+        job.update(step=step, progress=list(ROLLBACK_STEPS).index(step))
+
+    try:
+        with _audited("rollback"), promote_lock:
+            info = _activate(MlflowClient(), version, "rollback", "restored_at", progress)
+        job.update(status="ok", progress=len(ROLLBACK_STEPS), step=None, result=info)
+    except HTTPException as exc:
+        job.update(status="failed", step=None, error=str(exc.detail), http_status=exc.status_code)
+    except Exception as exc:  # never leave a job running forever
+        logger.exception("rollback job failed")
+        ADMIN_ACTIONS.labels("rollback", "failed").inc()
+        job.update(status="failed", step=None, error=str(exc), http_status=500)
+    job["finished_at"] = time.time()
+
+
+@app.post("/v1/model/rollback", status_code=202)
 def restore_version(body: VersionRequest, x_admin_key: str | None = Header(default=None)) -> dict[str, Any]:
-    """Serve an earlier registered version again by pointing the champion alias at it. Needs the admin key."""
+    """Start serving an earlier registered version again. Needs the admin key.
+
+    Returns 202 with a job; poll `GET /v1/model/jobs/{id}` for progress and the outcome.
+    """
     _require_admin(x_admin_key, "rollback")
-    with _audited("rollback"), promote_lock:
-        client = MlflowClient()
+    with _audited("rollback"):
         try:
-            client.get_model_version(MODEL_NAME, body.version)
+            MlflowClient().get_model_version(MODEL_NAME, body.version)
         except MlflowException as exc:
             raise HTTPException(status_code=404, detail=f"Version {body.version} does not exist") from exc
         if state["info"] is not None and state["info"]["version"] == body.version:
             raise HTTPException(status_code=409, detail=f"v{body.version} is already the champion")
-        return _activate(client, body.version, "rollback", "restored_at")
+        if any(j["status"] == "running" for j in jobs.values()):
+            raise HTTPException(status_code=409, detail="Another rollback is still running")
+    job = {
+        "id": uuid.uuid4().hex,
+        "action": "rollback",
+        "version": body.version,
+        "status": "running",
+        "steps": ROLLBACK_STEPS,
+        "step": "load",
+        "progress": 0,
+        "started_at": time.time(),
+    }
+    for old in sorted(jobs.values(), key=lambda j: j["started_at"])[: max(0, len(jobs) + 1 - MAX_JOBS)]:
+        jobs.pop(old["id"])
+    jobs[job["id"]] = job
+    threading.Thread(target=_run_rollback, args=(job, body.version), daemon=True, name="rollback").start()
+    return job
+
+
+@app.get("/v1/model/jobs/{job_id}")
+def job_status(job_id: str) -> dict[str, Any]:
+    """Progress of a rollback: `status` is running, ok (then `result` describes the served model) or failed."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Unknown job (the API pod may have restarted)")
+    return jobs[job_id]

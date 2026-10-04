@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 import mlflow.artifacts
+from mlflow.tracking import MlflowClient
 from prometheus_client import Counter, Gauge
 
 from src.training.buckets import BASELINE_FILE, EPSILON, OTHER, bucket_label
@@ -59,6 +60,10 @@ def load_profile(info: dict[str, Any] | None) -> FeatureProfile | None:
     if info is None:
         return None
     try:
+        # MLflow answers 500 for a missing artifact and the client retries for about a minute, so look first.
+        if BASELINE_FILE not in {a.path for a in MlflowClient().list_artifacts(info["run_id"])}:
+            logger.info("v%s was trained without a feature baseline, input drift is not monitored", info["version"])
+            return None
         baseline = mlflow.artifacts.load_dict(f"runs:/{info['run_id']}/{BASELINE_FILE}")
     except Exception as exc:
         logger.warning("No feature baseline for v%s, input drift is not monitored: %s", info["version"], exc)
