@@ -92,7 +92,7 @@ dvc repro --> qua quality gate? --yes--> alias "challenger" (CHƯA phục vụ)
 
 - Huấn luyện **không bao giờ tự duyệt**: chỉ đặt `challenger`. Không qua gate thì model không được đăng ký (lý do nằm trong tag `gate_failures` của run MLflow).
 - Duyệt (`POST /v1/model/promote`): cần `ADMIN_KEY`, chỉ nhận đúng phiên bản đang là `challenger`, nạp model và chạy thử trước khi đổi alias, ghi tag `approved_at`.
-- Khôi phục (`POST /v1/model/rollback`, nút Khôi phục ở bảng Lịch sử phiên bản): cùng khóa, cùng cách kiểm tra trước khi đổi. Mọi phiên bản đã đăng ký đều được giữ lại.
+- Khôi phục (`POST /v1/model/rollback`, nút Khôi phục ở bảng Lịch sử phiên bản): cùng khóa, cùng cách kiểm tra trước khi đổi. Khôi phục chạy nền vì nạp model có thể mất hơn một phút (quá timeout 60s của ingress): API trả `202` kèm job, UI hiện tiến độ và hỏi `GET /v1/model/jobs/{id}` mỗi giây (trạng thái `running`, `ok` hoặc `failed`). Job nằm trong bộ nhớ của pod đã nhận lệnh; Ingress `api-admin` băm theo IP client để cùng một người luôn tới đúng pod đó, và pod khởi động lại giữa chừng thì job báo 404. Mọi phiên bản đã đăng ký đều được giữ lại.
 - Bản sao API nhận lệnh đổi ngay; các bản sao khác theo kịp trong tối đa 30 giây (`MODEL_POLL_SECONDS=30`).
 
 ### 2.3 Canary (thủ công)
@@ -229,7 +229,8 @@ Kiểm tra thủ công trong cụm: `kubectl -n churn exec deploy/frontend -- wg
 | Pod `ImagePullBackOff` | Image chưa có trong Docker của cụm | Chạy `scripts/deploy-local.sh` (build vào Docker của cụm) |
 | Duyệt trả "Invalid admin key" | Khóa trên giao diện khác khóa trong Secret | So `.env` với Secret, tạo lại Secret nếu đã đổi |
 | Duyệt trả 409 | Challenger đã đổi, hoặc yêu cầu rơi vào bản canary ghim | Tải lại trang; lệnh quản trị đã được định tuyến vào nhóm stable qua Service `api-admin` |
-| Khôi phục trả 422 | Phiên bản cũ không tương thích schema API hiện tại | Không có gì thay đổi; chọn phiên bản khác |
+| Khôi phục báo lỗi 422 ở job | Phiên bản cũ không tương thích schema API hiện tại | Không có gì thay đổi; chọn phiên bản khác |
+| Khôi phục báo `cannot be loaded` sau ~60s | Phiên bản thiếu artifact model trong MinIO (MLflow trả 500, client retry) | Không có gì thay đổi; chọn phiên bản khác (v1 và v2 cũ không có `feature_baseline.json`, việc đó chỉ tắt giám sát drift, không chặn khôi phục) |
 | Deploy báo runner không chạy | Dịch vụ runner dừng hoặc Mac tắt | `./svc.sh start`, mở Docker Desktop, bấm lại |
 | `dvc repro` thoát mã khác 0 | Không qua quality gate | Xem tag `gate_failures` của run trên MLflow |
 | Dashboard Grafana trống | Chưa có lưu lượng (nhiều số liệu là tỷ lệ theo thời gian), hoặc Prometheus không quét được pod | Gửi vài yêu cầu dự đoán; mở `/prometheus/targets` xem `churn-api` có `up` |

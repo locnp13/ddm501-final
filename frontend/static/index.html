@@ -155,6 +155,10 @@
         <input id="approve-key" type="password" autocomplete="off" required>
       </label>
       <p class="muted" style="font-size:13px">Khóa nằm trong tệp <span class="mono">.env</span> trên máy chạy hệ thống (biến <span class="mono">ADMIN_KEY</span>). Khóa không được lưu lại.</p>
+      <div id="approve-progress" hidden>
+        <ol id="approve-steps" class="steps"></ol>
+        <div class="bar" style="width:100%"><i id="approve-bar" style="width:0"></i></div>
+      </div>
       <div id="approve-error" class="error" hidden></div>
       <div class="row" style="justify-content:flex-end;margin-top:14px">
         <button type="button" class="btn" id="approve-cancel">Hủy</button>

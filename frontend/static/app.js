@@ -503,6 +503,7 @@ function openDialog(action, version) {
     ? `Bạn sắp quay về <b>v${esc(version)}</b> thay cho model đang phục vụ (<b>${esc(from)}</b>). Từ lúc xác nhận, mọi dự đoán sẽ dùng bản cũ này. Model đang chờ duyệt (nếu có) không bị ảnh hưởng.`
     : `Bạn sắp thay model đang phục vụ (<b>${esc(from)}</b>) bằng <b>v${esc(version)}</b>. Từ lúc xác nhận, mọi dự đoán sẽ dùng model mới.`;
   $("#approve-error").hidden = true;
+  $("#approve-progress").hidden = true;
   $("#approve-key").value = "";
   Object.assign(dialog.dataset, { action, version });
   dialog.showModal();
@@ -515,12 +516,42 @@ $("#model-content").addEventListener("click", (e) => {
   else if (rollback) openDialog("rollback", rollback.dataset.rollback);
 });
 $("#approve-cancel").addEventListener("click", () => dialog.close());
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function showProgress(job) {
+  const keys = Object.keys(job.steps);
+  $("#approve-steps").innerHTML = keys.map((k, i) =>
+    `<li class="${i < job.progress ? "done" : k === job.step ? "active" : ""}">${esc(job.steps[k])}</li>`).join("");
+  $("#approve-bar").style.width = `${Math.round((job.progress / keys.length) * 100)}%`;
+  $("#approve-progress").hidden = false;
+}
+// A rollback runs in the background on the server (it can take over a minute): poll it until it ends.
+async function followJob(job) {
+  showProgress(job);
+  let misses = 0;
+  while (job.status === "running") {
+    await sleep(1000);
+    try {
+      const res = await fetch(`${API}/v1/model/jobs/${job.id}`);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(approveError(res, body));
+      job = body;
+      misses = 0;
+      showProgress(job);
+    } catch (err) {
+      if (++misses >= 5) throw err;
+    }
+  }
+  if (job.status !== "ok") throw new Error(job.error || "Khôi phục thất bại");
+  return job.result;
+}
 $("#approve-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const confirm = $("#approve-confirm"), errBox = $("#approve-error");
   confirm.disabled = true;
   confirm.textContent = "Đang xử lý…";
   errBox.hidden = true;
+  $("#approve-progress").hidden = true;
+  $("#approve-cancel").disabled = true;
   try {
     const res = await fetch(`${API}/v1/model/${dialog.dataset.action}`, {
       method: "POST",
@@ -529,16 +560,17 @@ $("#approve-form").addEventListener("submit", async (ev) => {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(approveError(res, body));
-    modelInfo = body;
+    modelInfo = res.status === 202 ? await followJob(body) : body;
     dialog.close();
     await renderModel();
     refreshStatus();
-    toast(`${dialog.dataset.action === "rollback" ? "Đã khôi phục" : "Đã duyệt"}: model v${body.version} đang phục vụ`);
+    toast(`${dialog.dataset.action === "rollback" ? "Đã khôi phục" : "Đã duyệt"}: model v${modelInfo.version} đang phục vụ`);
   } catch (err) {
     errBox.textContent = err.message;
     errBox.hidden = false;
   } finally {
     $("#approve-key").value = "";
+    $("#approve-cancel").disabled = false;
     confirm.disabled = false;
     confirm.textContent = dialog.dataset.action === "rollback" ? "Xác nhận khôi phục" : "Xác nhận duyệt";
   }
