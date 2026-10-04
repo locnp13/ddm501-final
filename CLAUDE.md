@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Git repo (origin `github.com/locnp13/ddm501-final`, branch `main`). Training pipeline, API skeleton, Compose stack and CI exist; see `README.md` for status and `docs/open-questions.md` for undecided points. Still missing: SHAP/LIME, fairness analysis, batch endpoint, CI deploy step.
+Git repo (origin `github.com/locnp13/ddm501-final`, branch `main`). Training pipeline, API skeleton, Compose stack and CI exist; see `README.md` for status and `docs/open-questions.md` for undecided points. Still missing: CI deploy step. Responsible AI (SHAP, LIME, fairness, mitigation) is in `src/responsible/`, discussed in `docs/responsible-ai.md`.
 
 ## Commands
 
@@ -16,6 +16,7 @@ Everything runs in Docker; no Python install on the host is needed.
 - The API loads the champion at startup and when a model is approved through the UI; a champion changed by other means (MLflow UI, `promote` script) is followed by the K8s pods within 30s (`kubectl -n churn rollout restart deploy/api` forces it)
 - Kubernetes (minikube profile `churn`, only api + frontend; MLflow/MinIO/Postgres stay in Compose): see `k8s/README.md`. `scripts/deploy-local.sh [TAG]` builds arm64 images into the cluster's Docker and rolls out; the manual `Deploy to local Kubernetes` workflow (Actions tab, Run workflow; self-hosted runner label `churn-local`, with a watchdog job that fails fast if the runner is offline) runs it. Pushes do not deploy. The API has `/ready` (503 until a model is loaded) for the readiness probe
 - Tests: `docker compose run --rm trainer pytest -q`; lint: `ruff check src tests` (config in `ruff.toml`)
+- Responsible-AI report for the champion (SHAP, LIME, fairness, equal-opportunity thresholds): `docker compose run --rm trainer python -m src.responsible.report [--log-to-run]`, writes `reports/responsible_ai/`
 - Data remote is the `dvc` bucket on MinIO: `docker compose run --rm trainer dvc push|pull`
 
 ## Architecture
@@ -25,7 +26,7 @@ Monitoring lives in `k8s/monitoring/` (Prometheus scraping each API pod via pod 
 Deployment topology, the deploy/model lifecycle flows, operations and known gaps are in `docs/deployment-guide.md`; keep it current when those change.
 
 
-`src/training/data.py` (download, Pandera schema, clean) -> `features.py` (in-pipeline feature engineering), `business.py` (profit/Recall@k), `registry.py` (gate, aliases, provenance), `train.py` (CV comparison, Optuna, isotonic calibration, MLflow logging, Evidently report) -> `model.py` (pyfunc wrapper returning P(churn)). `src/serving/app.py` loads `models:/churn-model@champion` and exposes `/v1/predict` (input validated by `src/serving/schemas.py`; keep it in sync with the Pandera `SCHEMA`, a test checks this), `/v1/model`, `/health`, `/metrics`. `frontend/` is an nginx container serving a static UI (plain HTML/CSS/JS) that calls the API through its `/api` proxy; `src/serving/model_info.py` builds the model description the UI shows from the MLflow registry. MLflow metadata is in Postgres and artifacts in MinIO (`mlflow` bucket). Pin xgboost/scikit-learn identically in `requirements.txt` (API) and `requirements-train.txt` (trainer) or the model will not load.
+`src/training/data.py` (download, Pandera schema, clean) -> `features.py` (in-pipeline feature engineering), `business.py` (profit/Recall@k), `registry.py` (gate, aliases, provenance), `train.py` (CV comparison, Optuna, isotonic calibration, MLflow logging, Evidently report) -> `model.py` (pyfunc wrapper returning P(churn)). `src/serving/app.py` loads `models:/churn-model@champion` and exposes `/v1/predict` and `/v1/predict/batch` (input validated by `src/serving/schemas.py`; keep it in sync with the Pandera `SCHEMA`, a test checks this), `/v1/model`, `/health`, `/metrics`. `frontend/` is an nginx container serving a static UI (plain HTML/CSS/JS) that calls the API through its `/api` proxy; `src/serving/model_info.py` builds the model description the UI shows from the MLflow registry. MLflow metadata is in Postgres and artifacts in MinIO (`mlflow` bucket). Pin xgboost/scikit-learn identically in `requirements.txt` (API) and `requirements-train.txt` (trainer) or the model will not load.
 
 ## What the project is
 

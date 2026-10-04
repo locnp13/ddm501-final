@@ -147,7 +147,7 @@ sequenceDiagram
 
 ## 5. Dữ liệu và quyền riêng tư trong thiết kế
 
-API **không lưu** yêu cầu hay dự đoán. Dữ liệu duy nhất rời khỏi request là các bộ đếm theo bucket (ví dụ "tenure 12-24 tháng: 37 lần"), không truy ngược được về một khách. Điều này tránh rủi ro lưu thông tin cá nhân, nhưng đổi lại hệ thống chưa đo được độ chính xác thật theo thời gian và chưa chạy được A/B (thiếu mã khách hàng và nhật ký dự đoán). Thảo luận đầy đủ về quyền riêng tư và đạo đức sẽ nằm trong tài liệu Responsible AI.
+API **không lưu** yêu cầu hay dự đoán. Dữ liệu duy nhất rời khỏi request là các bộ đếm theo bucket (ví dụ "tenure 12-24 tháng: 37 lần"), không truy ngược được về một khách. Điều này tránh rủi ro lưu thông tin cá nhân, nhưng đổi lại hệ thống chưa đo được độ chính xác thật theo thời gian và chưa chạy được A/B (thiếu mã khách hàng và nhật ký dự đoán). Thảo luận đầy đủ về quyền riêng tư và đạo đức: [`docs/responsible-ai.md`](docs/responsible-ai.md).
 
 ## 6. Lý do chọn công nghệ
 
@@ -174,7 +174,7 @@ API **không lưu** yêu cầu hay dự đoán. Dữ liệu duy nhất rời kh�
 
 | Điểm | Hiện tại | Giới hạn | Hướng mở rộng |
 |---|---|---|---|
-| API | 2 bản sao không giữ trạng thái, mô hình nạp vào bộ nhớ | Mỗi pod giữ một bản model; dự đoán đơn lẻ, chưa có batch | Tăng `replicas`, thêm HPA theo CPU hoặc độ trễ, thêm `/v1/predict/batch` |
+| API | 2 bản sao không giữ trạng thái, mô hình nạp vào bộ nhớ | Mỗi pod giữ một bản model; lô tối đa 1.000 khách mỗi lần gọi `/v1/predict/batch` | Tăng `replicas`, thêm HPA theo CPU hoặc độ trễ; lô lớn hơn thì chạy job batch đọc thẳng từ kho dữ liệu |
 | Giám sát | Prometheus một bản, giữ 7 ngày | Mất dữ liệu nếu xóa cụm | Remote write, hoặc Thanos |
 | MLflow, MinIO, Postgres | Một bản, ngoài cụm | **Điểm đơn lẻ**; không sao lưu volume | Chuyển vào cụm hoặc dùng dịch vụ quản lý |
 | Deploy | Phụ thuộc một chiếc Mac đang bật | Mac tắt thì không deploy được | Runner trên VM, hoặc build đa kiến trúc |
@@ -201,4 +201,4 @@ Toàn bộ chạy cục bộ nên chi phí tiền bằng 0, đổi lại là chi
 
 ## 8. Hạn chế đã biết
 
-Danh sách đầy đủ ở `docs/deployment-guide.md`, mục 7. Những điểm ảnh hưởng tới thiết kế: image trên cụm không phải image CI đã đẩy lên GHCR (CI build amd64, cụm chạy arm64); canary và A/B chưa nối với luồng duyệt model; cảnh báo chỉ hiện trên UI, chưa có kênh ngoài; hạ tầng ML chưa được giám sát và chưa sao lưu; chưa có SHAP/LIME, phân tích công bằng và endpoint batch.
+Danh sách đầy đủ ở `docs/deployment-guide.md`, mục 7. Những điểm ảnh hưởng tới thiết kế: image trên cụm không phải image CI đã đẩy lên GHCR (CI build amd64, cụm chạy arm64); canary và A/B chưa nối với luồng duyệt model; cảnh báo chỉ hiện trên UI, chưa có kênh ngoài; hạ tầng ML chưa được giám sát và chưa sao lưu; ngưỡng theo nhóm để giảm thiên lệch đã có nhưng chưa bật (xem `docs/responsible-ai.md`).

@@ -1,0 +1,262 @@
+{
+  "model_uri": "models:/churn-model@champion",
+  "model_version": "1",
+  "run_id": "38e3006da2d54639bf35911e55c95213",
+  "budget": 0.35,
+  "test_customers": 1409,
+  "explained_customers": 200,
+  "background_customers": 50,
+  "shap": {
+    "base_value": 0.2927,
+    "max_additivity_error": 0.0,
+    "importance": {
+      "Contract": 0.0875,
+      "tenure": 0.0663,
+      "InternetService": 0.0481,
+      "MonthlyCharges": 0.0328,
+      "OnlineSecurity": 0.0311,
+      "TotalCharges": 0.0262,
+      "PaymentMethod": 0.0245,
+      "TechSupport": 0.0243,
+      "PaperlessBilling": 0.0192,
+      "MultipleLines": 0.014,
+      "OnlineBackup": 0.0088,
+      "StreamingMovies": 0.0079,
+      "StreamingTV": 0.007,
+      "Dependents": 0.0041,
+      "PhoneService": 0.0034,
+      "DeviceProtection": 0.0014,
+      "Partner": 0.0007,
+      "SeniorCitizen": 0.0,
+      "gender": 0.0
+    },
+    "by_category": {
+      "Contract": {
+        "Month-to-month": 0.075,
+        "One year": -0.0827,
+        "Two year": -0.1267
+      },
+      "InternetService": {
+        "Fiber optic": 0.0488,
+        "No": -0.0411,
+        "DSL": -0.051
+      },
+      "PaymentMethod": {
+        "Electronic check": 0.0325,
+        "Credit card (automatic)": -0.02,
+        "Bank transfer (automatic)": -0.0201,
+        "Mailed check": -0.0218
+      },
+      "TechSupport": {
+        "No": 0.0238,
+        "No internet service": -0.0234,
+        "Yes": -0.0262
+      }
+    }
+  },
+  "lime_shap_top5_agreement": 0.72,
+  "local": {
+    "high_risk": {
+      "probability": 0.9870461702346802,
+      "customer": {
+        "gender": "Male",
+        "SeniorCitizen": 1,
+        "Partner": "Yes",
+        "Dependents": "No",
+        "tenure": 1,
+        "PhoneService": "Yes",
+        "MultipleLines": "Yes",
+        "InternetService": "Fiber optic",
+        "OnlineSecurity": "No",
+        "OnlineBackup": "No",
+        "DeviceProtection": "No",
+        "TechSupport": "No",
+        "StreamingTV": "Yes",
+        "StreamingMovies": "Yes",
+        "Contract": "Month-to-month",
+        "PaperlessBilling": "Yes",
+        "PaymentMethod": "Electronic check",
+        "MonthlyCharges": 95.1,
+        "TotalCharges": 95.1
+      },
+      "shap": {
+        "tenure = 1": 0.1905,
+        "Contract = Month-to-month": 0.1336,
+        "TotalCharges = 95.1": 0.0661,
+        "MonthlyCharges = 95.1": 0.0562,
+        "TechSupport = No": 0.0541,
+        "InternetService = Fiber optic": 0.0532,
+        "OnlineSecurity = No": 0.0337,
+        "PaymentMethod = Electronic check": 0.0335
+      },
+      "lime": {
+        "Contract=Month-to-month": 0.1704,
+        "tenure <= 10.00": 0.1102,
+        "MonthlyCharges > 90.40": 0.082,
+        "InternetService=Fiber optic": 0.0813,
+        "OnlineSecurity=No": 0.0601,
+        "PaymentMethod=Electronic check": 0.0434,
+        "TotalCharges <= 417.73": 0.0432,
+        "TechSupport=No": 0.0415
+      }
+    },
+    "low_risk": {
+      "probability": 0.0,
+      "customer": {
+        "gender": "Male",
+        "SeniorCitizen": 0,
+        "Partner": "Yes",
+        "Dependents": "No",
+        "tenure": 72,
+        "PhoneService": "Yes",
+        "MultipleLines": "Yes",
+        "InternetService": "No",
+        "OnlineSecurity": "No internet service",
+        "OnlineBackup": "No internet service",
+        "DeviceProtection": "No internet service",
+        "TechSupport": "No internet service",
+        "StreamingTV": "No internet service",
+        "StreamingMovies": "No internet service",
+        "Contract": "Two year",
+        "PaperlessBilling": "No",
+        "PaymentMethod": "Mailed check",
+        "MonthlyCharges": 25.4,
+        "TotalCharges": 1710.9
+      },
+      "shap": {
+        "Contract = Two year": -0.1104,
+        "tenure = 72": -0.0516,
+        "OnlineSecurity = No internet service": -0.0223,
+        "MonthlyCharges = 25.4": -0.0205,
+        "TechSupport = No internet service": -0.0202,
+        "PaymentMethod = Mailed check": -0.0188,
+        "PaperlessBilling = No": -0.0186,
+        "TotalCharges = 1710.9": -0.0137
+      },
+      "lime": {
+        "Contract=Two year": -0.1487,
+        "tenure > 56.00": -0.0786,
+        "MonthlyCharges <= 36.09": -0.0387,
+        "PaperlessBilling=No": -0.033,
+        "OnlineSecurity=No internet service": -0.0314,
+        "InternetService=No": -0.0266,
+        "TechSupport=No internet service": -0.0253,
+        "PhoneService=Yes": -0.0227
+      }
+    }
+  },
+  "fairness": {
+    "gender": {
+      "groups": {
+        "Female": {
+          "n": 687,
+          "churn_rate": 0.2809,
+          "mean_score": 0.2687,
+          "selection_rate": 0.3523,
+          "tpr": 0.7306,
+          "fpr": 0.2045,
+          "precision": 0.5826,
+          "brier": 0.1396
+        },
+        "Male": {
+          "n": 722,
+          "churn_rate": 0.2507,
+          "mean_score": 0.2655,
+          "selection_rate": 0.3476,
+          "tpr": 0.7569,
+          "fpr": 0.2107,
+          "precision": 0.5458,
+          "brier": 0.1308
+        }
+      },
+      "gaps": {
+        "demographic_parity_diff": 0.0046,
+        "disparate_impact_ratio": 0.9869,
+        "equal_opportunity_diff": 0.0263,
+        "fpr_diff": 0.0063,
+        "calibration_gap_diff": 0.0148
+      },
+      "proxy_auc": 0.471
+    },
+    "SeniorCitizen": {
+      "groups": {
+        "0": {
+          "n": 1187,
+          "churn_rate": 0.2325,
+          "mean_score": 0.2424,
+          "selection_rate": 0.3033,
+          "tpr": 0.7065,
+          "fpr": 0.1811,
+          "precision": 0.5417,
+          "brier": 0.1249
+        },
+        "1": {
+          "n": 222,
+          "churn_rate": 0.4414,
+          "mean_score": 0.399,
+          "selection_rate": 0.5991,
+          "tpr": 0.8469,
+          "fpr": 0.4032,
+          "precision": 0.6241,
+          "brier": 0.1899
+        }
+      },
+      "gaps": {
+        "demographic_parity_diff": 0.2958,
+        "disparate_impact_ratio": 0.5062,
+        "equal_opportunity_diff": 0.1404,
+        "fpr_diff": 0.2221,
+        "calibration_gap_diff": 0.0424
+      },
+      "proxy_auc": 0.7876
+    }
+  },
+  "mitigation": {
+    "attribute": "SeniorCitizen",
+    "repeats": 50,
+    "summary": {
+      "baseline.tpr_gap.mean": 0.126,
+      "equal_opportunity.tpr_gap.mean": 0.0957,
+      "baseline.tpr_gap.std": 0.047,
+      "equal_opportunity.tpr_gap.std": 0.0648,
+      "baseline.selection_gap.mean": 0.2914,
+      "equal_opportunity.selection_gap.mean": 0.1824,
+      "baseline.selection_gap.std": 0.0347,
+      "equal_opportunity.selection_gap.std": 0.0806,
+      "baseline.contact_share.mean": 0.3504,
+      "equal_opportunity.contact_share.mean": 0.3477,
+      "baseline.contact_share.std": 0.0,
+      "equal_opportunity.contact_share.std": 0.0225,
+      "baseline.profit.mean": 15630.0792,
+      "equal_opportunity.profit.mean": 14991.1752,
+      "baseline.profit.std": 1047.4672,
+      "equal_opportunity.profit.std": 1097.5037
+    },
+    "thresholds_full_test": {
+      "0": 0.3081,
+      "1": 0.3364
+    },
+    "groups_full_test": {
+      "0": {
+        "n": 1187,
+        "churn_rate": 0.2325,
+        "mean_score": 0.2424,
+        "selection_rate": 0.3168,
+        "tpr": 0.7246,
+        "fpr": 0.1932,
+        "precision": 0.5319,
+        "brier": 0.1249
+      },
+      "1": {
+        "n": 222,
+        "churn_rate": 0.4414,
+        "mean_score": 0.399,
+        "selection_rate": 0.5225,
+        "tpr": 0.7551,
+        "fpr": 0.3387,
+        "precision": 0.6379,
+        "brier": 0.1899
+      }
+    }
+  }
+}

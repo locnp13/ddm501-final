@@ -114,6 +114,15 @@ curl -X POST http://localhost:8088/api/v1/predict \
 
 Khi chưa có model mang alias `champion`, `/v1/predict` trả `503 Model not loaded`. Đây là hành vi có chủ đích.
 
+**Dự đoán hàng loạt** (`POST /v1/predict/batch`): gửi 1 đến 1.000 khách trong một lần gọi, ví dụ danh sách bộ phận chăm sóc cần xử lý trong tuần. Kết quả trả theo đúng thứ tự gửi, cùng một phiên bản model; mỗi khách có `warnings` riêng. Chỉ cần một khách sai là cả lô bị từ chối (`422`), và lỗi chỉ rõ vị trí, ví dụ `customers.1.tenure`. Mỗi khách trong lô được tính vào cùng các metric giám sát như `/v1/predict` (kể cả drift PSI); kích thước lô có metric riêng `churn_batch_size`.
+
+```bash
+curl -X POST http://localhost:8088/api/v1/predict/batch \
+  -H "Content-Type: application/json" \
+  -d '{"customers": [ {...khách 1...}, {...khách 2...} ]}'
+# ví dụ đầu ra: {"predictions": [{"churn_probability": 0.71, "warnings": []}, ...], "count": 2, "model_version": "3"}
+```
+
 **Kiểm tra đầu vào** (schema Pydantic, ví dụ có sẵn trong Swagger): thiếu trường, sai kiểu hoặc số ngoài dải (`tenure` 0-120, `MonthlyCharges` >= 0, `SeniorCitizen` 0/1) trả `422` kèm trường lỗi; `TotalCharges` được phép `null` (khách mới). Giá trị phân loại chưa từng thấy khi huấn luyện (ví dụ `PaymentMethod: "Momo"`) vẫn được dự đoán, phản hồi có `warnings` và metric `churn_unknown_category_total` tăng. Phản hồi gồm `churn_probability`, `model_version`, `warnings`.
 
 API còn có `GET /v1/model/versions` (lịch sử mọi phiên bản) và `POST /v1/model/rollback` (quay về bản cũ, cùng khóa quản trị; model được nạp và chạy thử trước khi đổi). Tab Mô hình của giao diện web có bảng lịch sử và nút Khôi phục. Cấu hình `MODEL_URI=models:/churn-model/3` ghim một phiên bản và `MODEL_POLL_SECONDS=30` cho API theo dõi alias; xem [`docs/rollout-strategies.md`](docs/rollout-strategies.md) (canary, A/B trên Kubernetes). API còn có `GET /v1/model/challenger` và `POST /v1/model/promote` (duyệt model: cần header `X-Admin-Key`, chỉ duyệt đúng bản đang là `challenger`, nạp thử model trước khi đổi alias, và phục vụ ngay không cần restart; tắt nếu `ADMIN_KEY` rỗng), `GET /v1/model` (phiên bản, chỉ số, cấu hình được chọn, nguồn gốc, đường cong lợi nhuận, so sánh cấu hình) và `GET /v1/model/figures/{calibration.png|profit_curve.png}`; giao diện web dùng các endpoint này.
@@ -180,6 +189,36 @@ Luật cảnh báo (`k8s/monitoring/prometheus/alerts.yml`, được kiểm th�
 
 Giám sát không đo được độ chính xác thật của model vì nhãn churn đến muộn; `PredictionDrift`, `UnknownCategorySpike` và `FeatureDrift` chỉ báo hiệu dữ liệu hoặc dự đoán đã đổi.
 
+### Mô phỏng lưu lượng để demo cảnh báo
+
+Đồ án không có khách hàng thật, nên `src/simulation/traffic.py` đóng vai khách: lấy mẫu khách từ `data/processed/churn.csv` và gửi tới API với tốc độ chọn được. **Đây là dữ liệu mô phỏng** (quyết định Q17 trong `docs/open-questions.md`). Script chỉ dùng thư viện chuẩn của Python, chạy được bằng `python3` có sẵn trên máy (cần cổng 8088 đang mở, ví dụ bằng `./run.sh`).
+
+| Chế độ | Gửi gì | Kết quả mong đợi trên Grafana và tab Cảnh báo |
+|---|---|---|
+| `normal` | Khách lấy nguyên từ dữ liệu | PSI mọi feature dưới 0,1; không có cảnh báo drift |
+| `drift` | Dịch phân phối có kiểm soát (mỗi thay đổi áp dụng với xác suất `--strength`, mặc định 0,7): hợp đồng theo tháng, `tenure` ngắn đi 4 lần, `MonthlyCharges` cao hơn, thanh toán bằng séc điện tử | PSI của `tenure`, `TotalCharges`, `MonthlyCharges`, `Contract`, `PaymentMethod` vượt 0,2; `FeatureDrift` (và thường cả `PredictionDrift`) bật sau khoảng 30 phút |
+| `invalid` | Trộn `--invalid-share` (mặc định 30%) yêu cầu sai: `tenure` âm, thiếu trường, sai kiểu | Tỷ lệ 422 vượt 20%, `HighValidationErrorRate` bật sau khoảng 10 phút |
+
+```bash
+python3 -m src.simulation.traffic --mode drift --report          # ước lượng PSI từng feature, không gửi gì
+python3 -m src.simulation.traffic --mode normal --rate 2 --duration 1800
+python3 -m src.simulation.traffic --mode drift  --rate 2 --duration 3600
+python3 -m src.simulation.traffic --mode invalid --rate 2 --duration 1200
+python3 -m src.simulation.traffic --mode drift --batch 50 --count 5000   # gửi theo lô qua /v1/predict/batch
+```
+
+Mỗi yêu cầu mang `X-Request-ID: sim-...`, nên log của API (dashboard *Churn: Log*) phân biệt được lưu lượng mô phỏng. Các luật drift cần trên 100 dự đoán trong 1 giờ và kéo dài 30 phút, nên với tốc độ 2 yêu cầu/giây hãy chạy chế độ `drift` ít nhất 45 phút. `--report` dùng thập phân vị của cả tệp dữ liệu, còn API dùng tập huấn luyện của model đang phục vụ, nên con số gần đúng chứ không trùng khớp.
+
+## Responsible AI
+
+Giải thích mô hình (SHAP và LIME), phân tích công bằng theo `gender` và `SeniorCitizen` kèm biện pháp giảm thiên lệch, quyền riêng tư và đạo đức: [`docs/responsible-ai.md`](docs/responsible-ai.md). Báo cáo số liệu tự sinh nằm ở [`reports/responsible_ai/summary.md`](reports/responsible_ai/summary.md); tạo lại cho model đang phục vụ (lần đầu cần `docker compose build trainer` để cài `shap` và `lime`):
+
+```bash
+docker compose run --rm trainer python -m src.responsible.report --log-to-run
+```
+
+Tóm tắt: ba yếu tố ảnh hưởng nhiều nhất là loại hợp đồng, thời gian sử dụng và loại internet; SHAP và LIME trùng 72% ở top 5 lý do của từng khách. Không có chênh lệch theo giới tính. Khách cao tuổi được liên hệ nhiều hơn (một phần do tỷ lệ rời bỏ thật cao gấp đôi, nhưng TPR vẫn cao hơn 14 điểm %); ngưỡng theo nhóm giảm chênh lệch với giá khoảng 4% lợi nhuận, và nhóm quyết định chưa bật trong production (lý do trong tài liệu).
+
 ## Kiểm thử và CI
 
 ```bash
@@ -198,8 +237,11 @@ k8s/              manifest minikube: api, frontend, Ingress, canary
 k8s/monitoring/   Prometheus, Alertmanager, Grafana (dashboard), Loki, Alloy, alert-hub, luật cảnh báo và test luật
 deploy/           Dockerfile cho api, mlflow, trainer
 src/alerts/       alert-hub: nhận webhook của Alertmanager, phục vụ tab Cảnh báo
+src/responsible/  báo cáo Responsible AI: SHAP, LIME, công bằng và giảm thiên lệch
+src/simulation/   mô phỏng lưu lượng (normal, drift, invalid) để demo giám sát và cảnh báo
 tests/            test dữ liệu và quality gate
-docs/             hướng dẫn triển khai và vận hành, sơ đồ luồng MLOps, spec, quyết định thiết kế
+docs/             hướng dẫn triển khai và vận hành, Responsible AI, sơ đồ luồng MLOps, spec, quyết định thiết kế
+reports/          số liệu huấn luyện (metrics.json) và báo cáo Responsible AI
 ```
 
 ## Trạng thái hiện tại
@@ -210,10 +252,6 @@ Pipeline huấn luyện đã chạy end-to-end (PR-AUC test 0.663, model `churn-
 
 Chưa hoàn thành (theo yêu cầu đề bài):
 
-- [ ] Endpoint `/v1/predict/batch` (schema chặt và ví dụ OpenAPI đã có cho `/v1/predict`)
-- [ ] Giải thích mô hình (SHAP, LIME)
-- [ ] Giảm thiểu thiên lệch (fairness): đã đo chênh lệch tỷ lệ được chọn theo `gender` và `SeniorCitizen`, chưa có biện pháp giảm
-- [ ] Tài liệu privacy và ethics
 - [ ] Nhật ký dự đoán (để đo độ chính xác thật và chạy A/B); drift đầu vào theo PSI đã có
 - [ ] Deploy tự động trong CI: hiện là workflow bấm tay trên self-hosted runner
 - [ ] Kênh cảnh báo Slack hoặc email (Telegram đã có, tùy chọn)
